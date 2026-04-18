@@ -22,7 +22,7 @@ const PDFViewer = dynamic(
 const DB_NAME = 'PolicyBuilderDB';
 const STORE_NAME = 'blocks';
 const dbPromise = typeof window !== 'undefined' ? new Promise<IDBDatabase>((resolve, reject) => {
-  const request = indexedDB.open(DB_NAME, 1);
+  const request = indexedDB.open(DB_NAME, 3);
   request.onupgradeneeded = () => {
     if (!request.result.objectStoreNames.contains(STORE_NAME)) {
       request.result.createObjectStore(STORE_NAME);
@@ -95,6 +95,7 @@ interface Block {
   companies?: Company[];
   tableLogoSize?: number;
   tableTextSize?: number;
+  showTableBullets?: boolean;
 }
 
 interface Variable {
@@ -110,17 +111,76 @@ interface Template {
   variables: Variable[];
 }
 
+type DialogType = 'ALERT' | 'CONFIRM' | 'PROMPT';
+
+interface DialogState {
+  isOpen: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  inputValue?: string;
+  onConfirm: (val?: string) => void;
+  onCancel?: () => void;
+}
+
 // --- MEMOIZED BLOCK COMPONENT ---
 const EditorBlock = React.memo(({ 
-  block, idx, isLast, updateBlock, removeBlock, moveBlock, handleBlockImageUpload, handleTableCompanyLogoUpload 
+  block, idx, isLast, updateBlock, removeBlock, moveBlock, handleBlockImageUpload, handleTableCompanyLogoUpload,
+  handleLogoUrlChange, logoStatuses
 }: {
   block: Block, idx: number, isLast: boolean,
   updateBlock: (id: string, updates: Partial<Block>) => void,
   removeBlock: (id: string) => void,
   moveBlock: (idx: number, dir: 'UP' | 'DOWN') => void,
   handleBlockImageUpload: (idx: number, e: any) => void,
-  handleTableCompanyLogoUpload: (idx: number, cIdx: number, e: any) => void
+  handleTableCompanyLogoUpload: (idx: number, cIdx: number, e: any) => void,
+  logoStatuses: Record<string, string>,
+  handleLogoUrlChange: (url: string, id: string, callback: (final: string) => void) => Promise<void>
 }) => {
+  // LOCAL STATE FOR INSTANT FEEDBACK WITHOUT PARENT RE-RENDERS
+  const [localHtml, setLocalHtml] = useState(block.htmlContent || '');
+  const [localImageUrl, setLocalImageUrl] = useState(block.imageUrl || '');
+  const [localWidth, setLocalWidth] = useState(block.imageWidth || 100);
+  const [localRadius, setLocalRadius] = useState(block.imageRadius || 0);
+
+  // SOURCE OF TRUTH TRACKING
+  const lastId = useRef(block.id);
+
+  // Sync ONLY when the block identity changes (e.g. template loads, deletion, reset)
+  // This is the "Overleaf" pattern: don't pull data back down while the user is inside it.
+  useEffect(() => {
+    if (block.id !== lastId.current) {
+      setLocalHtml(block.htmlContent || '');
+      setLocalImageUrl(block.imageUrl || '');
+      setLocalWidth(block.imageWidth || 100);
+      setLocalRadius(block.imageRadius || 0);
+      lastId.current = block.id;
+    }
+  }, [block.id, block.htmlContent, block.imageUrl, block.imageWidth, block.imageRadius]);
+
+  // Handle template/external updates (if the ID is the same but content was forced externally)
+  // We check if the local state is wildly different from the prop AND it hasn't matched for a while
+  // But for now, we trust the local state during the session.
+
+  // Debounced sync back to parent for PDF and Persistence
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localHtml !== block.htmlContent) updateBlock(block.id, { htmlContent: localHtml });
+    }, 1000); // 1s debounce for text
+    return () => clearTimeout(timer);
+  }, [localHtml, block.id, updateBlock, block.htmlContent]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+       if (localImageUrl !== block.imageUrl) updateBlock(block.id, { imageUrl: localImageUrl });
+       if (localWidth !== block.imageWidth) updateBlock(block.id, { imageWidth: localWidth });
+       if (localRadius !== block.imageRadius) updateBlock(block.id, { imageRadius: localRadius });
+    }, 500); // 500ms for visual settings
+    return () => clearTimeout(timer);
+  }, [localImageUrl, localWidth, localRadius, block.id, updateBlock, block.imageUrl, block.imageWidth, block.imageRadius]);
+
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 1024 : false;
+
   return (
     <div className="editor-card animate-fade">
       <div className="block-head">
@@ -140,44 +200,44 @@ const EditorBlock = React.memo(({
             theme="snow"
             modules={quillModules}
             formats={quillFormats}
-            value={block.htmlContent} 
-            onChange={(v) => updateBlock(block.id, { htmlContent: v })} 
+            value={localHtml} 
+            onChange={setLocalHtml} 
           />
         )}
         {block.type === 'IMAGE' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', gap: '32px' }}>
-              <div style={{ width: '200px', height: '200px', background: 'white', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                {block.imageUrl ? <img src={block.imageUrl} alt="Block Content" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <ImageIcon size={48} color="#94a3b8" />}
+            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
+              <div style={{ width: isMobile ? '100%' : '200px', height: isMobile ? 'auto' : '200px', minHeight: isMobile ? '160px' : '200px', background: 'white', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {localImageUrl ? <img src={localImageUrl} alt="Block Content" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <ImageIcon size={48} color="#94a3b8" />}
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: '240px' }}>
                 <label className="label-sm">Image Source</label>
                 <input 
                   type="text" 
                   placeholder="URL or Base64..."
-                  value={block.imageUrl} 
-                  onChange={(e) => updateBlock(block.id, { imageUrl: e.target.value })}
+                  value={localImageUrl} 
+                  onChange={(e) => setLocalImageUrl(e.target.value)}
                   style={{ width: '100%', marginBottom: '16px' }}
                 />
                  <label className="action-pill" style={{ marginBottom: '16px' }}>
                   <ImageIcon size={14} /> Upload Local File
                   <input type="file" hidden onChange={(e) => handleBlockImageUpload(idx, e)} />
                 </label>
-                <label className="label-sm">Width ({block.imageWidth || 100}%)</label>
+                <label className="label-sm">Width ({localWidth}%)</label>
                 <input 
                   type="range" min="10" max="100" 
-                  value={block.imageWidth || 100} 
-                  onChange={(e) => updateBlock(block.id, { imageWidth: parseInt(e.target.value) })}
+                  value={localWidth} 
+                  onChange={(e) => setLocalWidth(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '16px', marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
-              <div style={{ flex: 1 }}>
-                <label className="label-sm">Corner Radius: {block.imageRadius}px</label>
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <label className="label-sm">Corner Radius: {localRadius}px</label>
                 <input 
-                  type="range" min="0" max="250" value={block.imageRadius || 0}
-                  onChange={(e) => updateBlock(block.id, { imageRadius: parseInt(e.target.value) })}
+                  type="range" min="0" max="250" value={localRadius}
+                  onChange={(e) => setLocalRadius(parseInt(e.target.value))}
                   className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
               </div>
@@ -199,14 +259,28 @@ const EditorBlock = React.memo(({
         )}
         {block.type === 'COMPARISON_TABLE' && block.companies && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-             <div style={{ display: 'flex', gap: '20px' }}>
-               <div style={{ flex: 1 }}>
+             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+               <div style={{ flex: 1, minWidth: '150px' }}>
                  <label className="label-sm">Logo Height: {block.tableLogoSize || 30}px</label>
                  <input type="range" min="20" max="120" value={block.tableLogoSize || 30} onChange={(e) => updateBlock(block.id, { tableLogoSize: parseInt(e.target.value) })} style={{ width: '100%' }} />
                </div>
-               <div style={{ flex: 1 }}>
+               <div style={{ flex: 1, minWidth: '150px' }}>
                  <label className="label-sm">Benefit Text Size: {block.tableTextSize || 10}px</label>
                  <input type="range" min="6" max="18" value={block.tableTextSize || 10} onChange={(e) => updateBlock(block.id, { tableTextSize: parseInt(e.target.value) })} style={{ width: '100%' }} />
+               </div>
+               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingBottom: '4px' }}>
+                 <label className="label-sm" style={{ marginBottom: 0 }}>Show Bullets</label>
+                 <button 
+                   onClick={() => updateBlock(block.id, { showTableBullets: block.showTableBullets === undefined ? false : !block.showTableBullets })}
+                   style={{ 
+                     padding: '4px 12px', borderRadius: '20px', fontSize: '11px',
+                     background: (block.showTableBullets !== false) ? '#3b82f6' : '#334155',
+                     color: '#fff', border: 'none', cursor: 'pointer',
+                     fontWeight: 600
+                   }}
+                 >
+                   {(block.showTableBullets !== false) ? 'YES' : 'NO'}
+                 </button>
                </div>
              </div>
              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
@@ -216,16 +290,61 @@ const EditorBlock = React.memo(({
                         <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--brand-primary)' }}>PLAN #{cIdx + 1}</span>
                         <button onClick={() => updateBlock(block.id, { companies: block.companies?.filter(comp => comp.id !== c.id) })} className="btn-ghost" style={{ color: '#EF4444' }}><Trash2 size={14}/></button>
                       </div>
+                      
+                      {/* LOGO PREVIEW */}
+                      <div style={{ width: '100%', height: '60px', background: 'white', borderRadius: '8px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(0,0,0,0.1)' }}>
+                        {c.logoUrl ? (
+                          <img src={c.logoUrl} alt="Logo" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                        ) : (
+                          <ImageIcon size={20} color="#cbd5e1" />
+                        )}
+                      </div>
+
                       <input value={c.name} onChange={(e) => {
                         const nc = [...block.companies!];
                         nc[cIdx].name = e.target.value;
                         updateBlock(block.id, { companies: nc });
                       }} style={{ width: '100%', marginBottom: '12px', fontWeight: 700 }} placeholder="Company Name" />
-                      <input value={c.logoUrl} onChange={(e) => {
-                         const nc = [...block.companies!];
-                         nc[cIdx].logoUrl = e.target.value;
-                         updateBlock(block.id, { companies: nc });
-                      }} style={{ width: '100%', fontSize: '11px', marginBottom: '12px' }} placeholder="Logo URL" />
+                      <div style={{ position: 'relative' }}>
+                        <input value={c.logoUrl} onChange={(e) => {
+                           const newUrl = e.target.value;
+                           const nc = [...block.companies!];
+                           nc[cIdx].logoUrl = newUrl;
+                           updateBlock(block.id, { companies: nc });
+                           
+                           handleLogoUrlChange(newUrl, c.id, (final) => {
+                              const nc2 = [...block.companies!];
+                              nc2[cIdx].logoUrl = final;
+                              updateBlock(block.id, { companies: nc2 });
+                           });
+                        }} style={{ width: '100%', fontSize: '11px', marginBottom: '8px', paddingRight: '40px' }} placeholder="Logo URL (or Base64)" />
+                        
+                        {/* MINI BADGE */}
+                        <div style={{ position: 'absolute', right: '8px', top: '8px' }}>
+                          {logoStatuses[c.id] === 'LOADING' && <div className="animate-spin" style={{ width: '14px', height: '14px', border: '2px solid transparent', borderTopColor: 'var(--brand-primary)', borderRadius: '100%' }} />}
+                          {logoStatuses[c.id] === 'VERIFIED' && <CheckCircle size={14} color="#10B981" />}
+                          {logoStatuses[c.id] === 'WEB_ONLY' && <AlertCircle size={14} color="#F59E0B" />}
+                          {logoStatuses[c.id] === 'ERROR' && <XCircle size={14} color="#EF4444" />}
+                        </div>
+                      </div>
+
+                      {logoStatuses[c.id] === 'WEB_ONLY' && (
+                        <div style={{ fontSize: '10px', color: '#F59E0B', background: 'rgba(245,158,11,0.05)', padding: '8px', borderRadius: '4px', marginBottom: '12px', border: '1px solid rgba(245,158,11,0.1)' }}>
+                          ⚠️ <strong>Web-Only:</strong> This image works here but is blocked for PDF. Please download and use the "Upload Logo File" button below for a perfect export.
+                        </div>
+                      )}
+                      
+                      {logoStatuses[c.id] === 'ERROR' && (
+                        <div style={{ fontSize: '10px', color: '#EF4444', background: 'rgba(239,68,68,0.05)', padding: '8px', borderRadius: '4px', marginBottom: '12px', border: '1px solid rgba(239,68,68,0.1)' }}>
+                          ❌ <strong>Failed:</strong> Could not load this image URL. Please check the link.
+                        </div>
+                      )}
+
+                      {logoStatuses[c.id] === 'VERIFIED' && (
+                        <div style={{ fontSize: '10px', color: '#10B981', background: 'rgba(16,185,129,0.05)', padding: '8px', borderRadius: '4px', marginBottom: '12px', border: '1px solid rgba(16,185,129,0.1)' }}>
+                          ✅ <strong>PDF Ready:</strong> Image successfully processed for export.
+                        </div>
+                      )}
                       <textarea value={c.benefits} onChange={(e) => {
                         const nc = [...block.companies!];
                         nc[cIdx].benefits = e.target.value;
@@ -259,10 +378,14 @@ export default function PolicyEditor() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [lastSaved, setLastSaved] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
+  const [logoStatuses, setLogoStatuses] = useState<Record<string, 'LOADING' | 'VERIFIED' | 'WEB_ONLY' | 'ERROR' | ''>>({});
   const [activeTab, setActiveTab] = useState<'blocks' | 'variables' | 'settings' | 'templates'>('blocks');
   const [showPreview, setShowPreview] = useState(true);
   const [baseFontSize, setBaseFontSize] = useState(11);
   const [quotaError, setQuotaError] = useState(false);
+  const [pageBgColor, setPageBgColor] = useState('#F5F3FF'); // Default to light purple
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileActivePanel, setMobileActivePanel] = useState<'sidebar' | 'editor' | 'preview'>('editor');
 
   // CORE STATE
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -275,11 +398,36 @@ export default function PolicyEditor() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // CUSTOM DIALOG STATE
+  const [dialog, setDialog] = useState<DialogState>({
+    isOpen: false,
+    type: 'ALERT',
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
+  const openDialog = (options: Omit<DialogState, 'isOpen'>) => {
+    setDialog({ ...options, isOpen: true });
+  };
+
+  const closeDialog = () => {
+    setDialog(prev => ({ ...prev, isOpen: false }));
+  };
+
   // SIDEBAR & PREVIEW WIDTHS
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [previewWidth, setPreviewWidth] = useState(450);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
+
+  // MOBILE DETECTION
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // UTILS: Image Compression
   const compressImage = (dataUrl: string): Promise<string> => {
@@ -304,7 +452,32 @@ export default function PolicyEditor() {
     });
   };
 
-  // OPTIMIZED LOAD (Triage Metadata vs Heavy Content)
+  const urlToBase64 = async (url: string): Promise<{ data: string, status: 'VERIFIED' | 'WEB_ONLY' | 'ERROR' }> => {
+    if (!url) return { data: '', status: 'ERROR' };
+    if (url.startsWith('data:')) return { data: url, status: 'VERIFIED' };
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Fetch failed');
+      const blob = await response.blob();
+      
+      // Basic validation that it is an image
+      if (!blob.type.startsWith('image/')) {
+        return { data: url, status: 'ERROR' };
+      }
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      return { data: base64, status: 'VERIFIED' };
+    } catch (e) {
+      console.warn('Logo Fetch Info:', e);
+      // If we can't fetch it via JS, it's WEB_ONLY (will show in browser but not PDF)
+      return { data: url, status: 'WEB_ONLY' };
+    }
+  };
   useEffect(() => {
     const load = async () => {
       setIsMounted(true);
@@ -324,6 +497,9 @@ export default function PolicyEditor() {
           const parsed = parseInt(savedBaseFont);
           if (!isNaN(parsed)) setBaseFontSize(parsed);
         }
+
+        const savedPageColor = localStorage.getItem('pb-page-color');
+        if (savedPageColor) setPageBgColor(savedPageColor);
 
         // 2. Heavy Document Data Next
         const [savedBlocks, savedVariables, savedTemplates] = await Promise.all([
@@ -364,6 +540,7 @@ export default function PolicyEditor() {
         localStorage.setItem('pb-logo-valign', headerVAlign);
         localStorage.setItem('pb-theme', theme);
         localStorage.setItem('pb-base-font', baseFontSize.toString());
+        localStorage.setItem('pb-page-color', pageBgColor);
         setQuotaError(false);
       } catch (e) {
         console.error('Storage Error:', e);
@@ -375,7 +552,7 @@ export default function PolicyEditor() {
     }, 1500);
 
     return () => clearTimeout(timeoutId);
-  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, theme, baseFontSize]);
+  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, theme, baseFontSize, pageBgColor]);
 
   // RESIZING LOGIC
   useEffect(() => {
@@ -406,6 +583,25 @@ export default function PolicyEditor() {
     setBlocks(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
   }, []);
 
+  // AUTO-PROXY LOGO HANDLER
+  const handleLogoUrlChange = async (url: string, id: string, callback: (finalUrl: string) => void) => {
+    if (!url) {
+      callback('');
+      setLogoStatuses(prev => ({ ...prev, [id]: '' }));
+      return;
+    }
+    
+    callback(url); 
+    setLogoStatuses(prev => ({ ...prev, [id]: 'LOADING' }));
+    
+    const result = await urlToBase64(url);
+    setLogoStatuses(prev => ({ ...prev, [id]: result.status }));
+    
+    if (result.status === 'VERIFIED' && result.data !== url) {
+      callback(result.data);
+    }
+  };
+
   const addBlock = useCallback((type: BlockType) => {
     const id = Date.now().toString();
     const newBlock: Block = { 
@@ -421,7 +617,16 @@ export default function PolicyEditor() {
   }, []);
 
   const removeBlock = useCallback((id: string) => {
-    setBlocks(prev => prev.filter(b => b.id !== id));
+    openDialog({
+      type: 'CONFIRM',
+      title: 'Delete Section?',
+      message: 'Are you sure you want to remove this section? This action cannot be undone.',
+      onConfirm: () => {
+        setBlocks(prev => prev.filter(b => b.id !== id));
+        closeDialog();
+      },
+      onCancel: closeDialog
+    });
   }, []);
 
   const moveBlock = useCallback((idx: number, dir: 'UP' | 'DOWN') => {
@@ -442,6 +647,10 @@ export default function PolicyEditor() {
     return result;
   }, [variables]);
 
+  // DEFERRED VALUES FOR PREVIEW
+  const deferredBlocks = useDeferredValue(debouncedBlocks);
+  const deferredLogo = useDeferredValue(debouncedLogo);
+
   useEffect(() => {
     if (!isDataLoaded) return;
     setIsSyncing(true);
@@ -458,32 +667,48 @@ export default function PolicyEditor() {
       setDebouncedBlocks(prepared);
       setDebouncedLogo(headerLogoUrl);
       setIsSyncing(false);
-    }, 1200); // 1.2s pause before heavy PDF render
+    }, 1500); // 1.5s pause before heavy PDF render
     return () => clearTimeout(timer);
   }, [blocks, headerLogoUrl, replaceVars, isDataLoaded]);
 
   // TEMPLATE ENGINE
   const handleSaveTemplate = () => {
-    const name = prompt("Enter Template Name:");
-    if (!name) return;
-    const newTemp: Template = {
-      id: Date.now().toString(),
-      name,
-      blocks,
-      logo: headerLogoUrl,
-      variables
-    };
-    const updated = [...templates, newTemp];
-    setTemplates(updated);
-    localStorage.setItem('pb-templates', JSON.stringify(updated));
+    openDialog({
+      type: 'PROMPT',
+      title: 'Save as Template',
+      message: 'Enter a name for this template:',
+      inputValue: `Template ${new Date().toLocaleDateString()}`,
+      onConfirm: (name) => {
+        if (!name) return;
+        const newTemp: Template = {
+          id: Date.now().toString(),
+          name,
+          blocks,
+          logo: headerLogoUrl,
+          variables
+        };
+        const updated = [...templates, newTemp];
+        setTemplates(updated);
+        localStorage.setItem('pb-templates', JSON.stringify(updated));
+        closeDialog();
+      },
+      onCancel: closeDialog
+    });
   };
 
   const loadTemplate = (t: Template) => {
-    if (confirm(`Load template "${t.name}"? Current changes will be overwritten.`)) {
-      setBlocks(t.blocks);
-      setHeaderLogoUrl(t.logo);
-      setVariables(t.variables);
-    }
+    openDialog({
+      type: 'CONFIRM',
+      title: 'Load Template',
+      message: `Load template "${t.name}"? Current changes will be overwritten.`,
+      onConfirm: () => {
+        setBlocks(t.blocks);
+        setHeaderLogoUrl(t.logo);
+        setVariables(t.variables);
+        closeDialog();
+      },
+      onCancel: closeDialog
+    });
   };
 
   // TEMPLATE ENGINE
@@ -532,22 +757,23 @@ export default function PolicyEditor() {
   // RENDER (ULTRA-FAST LOADING SCREEN)
   if (!isMounted || !isDataLoaded) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen" style={{ background: '#050510', color: '#fff', gap: '32px' }}>
-        <div style={{ position: 'relative', width: '80px', height: '80px' }}>
-          <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
-          <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <div suppressHydrationWarning className="flex flex-col items-center justify-center min-h-screen" style={{ background: '#050510', color: '#fff', gap: '32px' }}>
+        <div suppressHydrationWarning style={{ position: 'relative', width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500/10 rounded-full" style={{ borderStyle: 'dashed' }}></div>
+          <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <img suppressHydrationWarning src="/icon.png" alt="VORN" style={{ width: '40px', height: '40px', borderRadius: '8px', zIndex: 2 }} />
         </div>
-        <div style={{ textAlign: 'center' }}>
-          <h1 className="font-title" style={{ fontSize: '24px', letterSpacing: '4px', marginBottom: '8px', opacity: 0.9 }}>VORN</h1>
-          <p className="animate-pulse" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '2px', color: '#3b82f6', fontWeight: 800 }}>Initializing Premium Engine...</p>
+        <div suppressHydrationWarning style={{ textAlign: 'center' }}>
+          <h1 suppressHydrationWarning className="font-title" style={{ fontSize: '24px', letterSpacing: '4px', marginBottom: '8px', opacity: 0.9 }}>VORN</h1>
+          <p suppressHydrationWarning className="animate-pulse" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '2px', color: '#3b82f6', fontWeight: 800 }}>Initializing Premium Engine...</p>
         </div>
-        <div style={{ position: 'fixed', bottom: '40px', fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>VORN OPTIMIZED v2.0</div>
+        <div suppressHydrationWarning style={{ position: 'fixed', bottom: '40px', fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>VORN OPTIMIZED v2.0</div>
       </div>
     );
   }
 
   return (
-    <div className={`app-container ${theme}`} style={{ 
+    <div suppressHydrationWarning className={`app-container ${theme}`} style={{ 
       background: theme === 'dark' ? '#050510' : '#f8fafc',
       color: theme === 'dark' ? '#f8fafc' : '#0f172a',
       minHeight: '100vh',
@@ -625,38 +851,54 @@ export default function PolicyEditor() {
           scroll-behavior: smooth;
         }
         * { box-sizing: border-box; }
+        
+        @media (max-width: 1024px) {
+          .desktop-only { display: none !important; }
+          .app-main-content { padding: 16px !important; }
+          .glass-nav { height: 60px !important; padding: 0 16px !important; }
+          .glass-nav h2 { fontSize: 16px !important; }
+          .glass-nav p { display: none; }
+          .sidebar-panel, .preview-panel { 
+            position: fixed; top: 60px; left: 0; right: 0; bottom: 60px;
+            width: 100% !important; z-index: 50; background: var(--bg-primary);
+          }
+        }
+        @media (min-width: 1025px) {
+          .mobile-only { display: none !important; }
+        }
       `}} />
       {/* PREMIUM NAVBAR */}
       <nav className="glass-nav" style={{ height: '70px', display: 'flex', alignItems: 'center', padding: '0 32px', justifyContent: 'space-between', zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ background: 'var(--brand-primary)', padding: '10px', borderRadius: '10px' }}>
-            <LayoutTemplate size={22} color="white" />
+          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img src="/icon.png" alt="VORN Logo" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain' }} />
           </div>
           <div>
-            <h2 className="font-title" style={{ fontSize: '22px' }}>PolicyBuilder <span style={{ color: 'var(--brand-primary)' }}>SaaS</span></h2>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>PROFESSIONAL POLICY DESIGNER</p>
+            <h2 className="font-title" style={{ fontSize: isMobile ? '16px' : '22px' }}>VORN <span style={{ color: 'var(--brand-primary)' }}>Policy Builder</span></h2>
+            {!isMobile && <p style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>PREMIUM DOCUMENT ENGINE</p>}
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          {lastSaved && <div style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle size={14} color="#10B981" /> Auto-saved</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '20px' }}>
+          {!isMobile && lastSaved && <div style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle size={14} color="#10B981" /> Auto-saved</div>}
           
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="btn-ghost">
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="btn-ghost" style={{ padding: isMobile ? '8px' : '10px' }}>
+              {theme === 'dark' ? <Sun size={isMobile ? 18 : 20} /> : <Moon size={isMobile ? 18 : 20} />}
             </button>
-            <div style={{ width: '1px', height: '24px', background: 'var(--border-subtle)', margin: '0 8px' }} />
+            {!isMobile && <div style={{ width: '1px', height: '24px', background: 'var(--border-subtle)', margin: '0 8px' }} />}
             
             {isMounted && (
               <PDFDownloadLink 
-                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={baseFontSize} />} 
+                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={baseFontSize} pageBgColor={pageBgColor} />} 
                 fileName="PolicyProposal.pdf"
                 className="btn-primary"
+                style={{ padding: isMobile ? '10px 14px' : '12px 24px', fontSize: isMobile ? '11px' : '13px' }}
               >
                 {({ loading }) => (
                   <>
-                    <Download size={18} />
-                    {loading ? 'Preparing...' : 'Download PDF'}
+                    <Download size={isMobile ? 14 : 18} />
+                    {loading ? (isMobile ? '...' : 'Preparing...') : (isMobile ? 'PDF' : 'Download PDF')}
                   </>
                 )}
               </PDFDownloadLink>
@@ -665,9 +907,21 @@ export default function PolicyEditor() {
         </div>
       </nav>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* SIDEBAR */}
-        <aside style={{ width: sidebarWidth, minWidth: '280px', borderRight: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {/* SIDEBAR PANEL */}
+        {(!isMobile || mobileActivePanel === 'sidebar') && (
+          <aside 
+            className="sidebar-panel"
+            style={{ 
+              width: isMobile ? '100%' : sidebarWidth, 
+              minWidth: isMobile ? 'none' : '280px', 
+              borderRight: isMobile ? 'none' : '1px solid var(--border-subtle)', 
+              background: 'var(--bg-secondary)', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              overflowY: 'auto'
+            }}
+          >
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)' }}>
             {(['blocks', 'variables', 'settings', 'templates'] as const).map(tab => (
               <button 
@@ -692,10 +946,26 @@ export default function PolicyEditor() {
                 <div style={{ background: '#fff', borderRadius: '12px', padding: '12px', marginBottom: '16px', border: '1px solid var(--border-subtle)' }}>
                   {headerLogoUrl ? <img src={headerLogoUrl} alt="Header Logo" style={{ maxHeight: '40px', maxWidth: '100%', objectFit: 'contain' }} /> : <div style={{ height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '11px' }}>No Logo</div>}
                 </div>
-                <label className="action-pill" style={{ marginBottom: '32px' }}>
-                  <ImageIcon size={14} /> Change Logo
+                <label className="action-pill" style={{ marginBottom: '12px' }}>
+                  <ImageIcon size={14} /> Upload Logo File
                   <input type="file" hidden onChange={handleHeaderLogoUpload} />
                 </label>
+                  <div style={{ marginBottom: '32px' }}>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        value={headerLogoUrl} 
+                        onChange={(e) => handleLogoUrlChange(e.target.value, 'header-logo', setHeaderLogoUrl)}
+                        placeholder="or paste Logo URL here..." 
+                        style={{ width: '100%', fontSize: '11px', padding: '8px', borderRadius: '8px', paddingRight: '40px' }}
+                      />
+                      <div style={{ position: 'absolute', right: '8px', top: '8px' }}>
+                        {logoStatuses['header-logo'] === 'LOADING' && <div className="animate-spin" style={{ width: '14px', height: '14px', border: '2px solid transparent', borderTopColor: 'var(--brand-primary)', borderRadius: '100%' }} />}
+                        {logoStatuses['header-logo'] === 'VERIFIED' && <CheckCircle size={14} color="#10B981" />}
+                        {logoStatuses['header-logo'] === 'WEB_ONLY' && <AlertCircle size={14} color="#F59E0B" />}
+                        {logoStatuses['header-logo'] === 'ERROR' && <XCircle size={14} color="#EF4444" />}
+                      </div>
+                    </div>
+                  </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                   <label className="label-sm">Position</label>
@@ -777,9 +1047,18 @@ export default function PolicyEditor() {
                        <div style={{ display: 'flex', gap: '8px' }}>
                           <button onClick={() => loadTemplate(t)} className="btn-ghost" title="Load" style={{ padding: '4px' }}><FileOutput size={14}/></button>
                           <button onClick={() => {
-                            const updated = templates.filter(temp => temp.id !== t.id);
-                            setTemplates(updated);
-                            localStorage.setItem('pb-templates', JSON.stringify(updated));
+                            openDialog({
+                              type: 'CONFIRM',
+                              title: 'Delete Template?',
+                              message: `Are you sure you want to delete "${t.name}"?`,
+                              onConfirm: () => {
+                                const updated = templates.filter(temp => temp.id !== t.id);
+                                setTemplates(updated);
+                                localStorage.setItem('pb-templates', JSON.stringify(updated));
+                                closeDialog();
+                              },
+                              onCancel: closeDialog
+                            });
                           }} className="btn-ghost" title="Delete" style={{ color: '#EF4444', padding: '4px' }}><Trash2 size={14}/></button>
                        </div>
                     </div>
@@ -804,104 +1083,232 @@ export default function PolicyEditor() {
                       This scales all text in the document proportionately.
                     </p>
                   </div>
+
+                  <div className="side-label" style={{ marginTop: '24px' }}>Page Background</div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => setPageBgColor('#FFFFFF')} 
+                      style={{ 
+                        flex: 1, padding: '12px', borderRadius: '12px', 
+                        background: pageBgColor === '#FFFFFF' ? 'var(--brand-primary)' : 'var(--bg-primary)',
+                        color: pageBgColor === '#FFFFFF' ? 'white' : 'var(--text-secondary)',
+                        border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                        fontSize: '11px', fontWeight: 700
+                      }}
+                    >
+                      Clean White
+                    </button>
+                    <button 
+                      onClick={() => setPageBgColor('#F5F3FF')} 
+                      style={{ 
+                        flex: 1, padding: '12px', borderRadius: '12px', 
+                        background: pageBgColor === '#F5F3FF' ? 'var(--brand-primary)' : '#F5F3FF',
+                        color: pageBgColor === '#F5F3FF' ? 'white' : '#7C3AED',
+                        border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                        fontSize: '11px', fontWeight: 700
+                      }}
+                    >
+                      Premium Purple
+                    </button>
+                  </div>
                </div>
             )}
           </div>
         </aside>
+      )}
 
-        {/* RESIZER */}
-        <div onMouseDown={() => setIsResizingSidebar(true)} style={{ width: '4px', cursor: 'col-resize', background: isResizingSidebar ? 'var(--brand-primary)' : 'transparent', zIndex: 10 }} />
+        {/* RESIZER 1 */}
+        {!isMobile && (
+          <div onMouseDown={() => setIsResizingSidebar(true)} style={{ width: '4px', cursor: 'col-resize', background: isResizingSidebar ? 'var(--brand-primary)' : 'transparent', zIndex: 10 }} />
+        )}        {/* MAIN EDITOR */}
+        {(!isMobile || mobileActivePanel === 'editor') && (
+          <main className="app-main-content" style={{ 
+            flex: 1, 
+            overflowY: 'auto', 
+            padding: isMobile ? '20px' : '32px 40px', 
+            background: 'var(--bg-primary)', 
+            position: 'relative',
+            scrollBehavior: 'smooth'
+          }}>
+            <div style={{ 
+              maxWidth: showPreview ? '850px' : '1080px', 
+              margin: '0 auto', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: isMobile ? '20px' : '32px',
+              transition: 'max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)' 
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'flex-end', 
+                marginBottom: '8px',
+                paddingBottom: '16px',
+                borderBottom: '1px solid var(--border-subtle)'
+              }}>
+                <div>
+                  <h2 className="font-title" style={{ fontSize: isMobile ? '16px' : '24px', marginBottom: '4px' }}>Document Editor</h2>
+                  {lastSaved && (
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle size={12} color="#10B981" /> 
+                      Last changes saved at {lastSaved}
+                    </div>
+                  )}
+                </div>
+                {!isMobile && (
+                  <button 
+                    onClick={() => setShowPreview(!showPreview)} 
+                    className="btn-ghost" 
+                    style={{ 
+                      fontSize: '12px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px',
+                      padding: '8px 16px',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      fontWeight: 600
+                    }}
+                  >
+                    {showPreview ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPreview ? 'Hide Preview' : 'Show Preview'}
+                  </button>
+                )}
+              </div>
 
-        {/* MAIN EDITOR */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '60px', background: 'var(--bg-primary)', position: 'relative' }}>
-          <div style={{ maxWidth: '850px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 className="font-title" style={{ fontSize: '20px' }}>Document Editor</h2>
+              {blocks.map((block, idx) => (
+                <EditorBlock 
+                  key={block.id}
+                  block={block}
+                  idx={idx}
+                  isLast={idx === blocks.length - 1}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  moveBlock={moveBlock}
+                  handleBlockImageUpload={handleBlockImageUpload}
+                  handleTableCompanyLogoUpload={handleTableCompanyLogoUpload}
+                  logoStatuses={logoStatuses}
+                  handleLogoUrlChange={handleLogoUrlChange}
+                />
+              ))}
+              
+              <div style={{ activeTab: activeTab === 'settings' ? 'block' : 'none' as any }}>
+                {activeTab === 'settings' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '40px' }}>
+                    <div>
+                      <label className="side-label"><Settings size={14} /> Global Styling</label>
+                      <div className="editor-card" style={{ padding: '24px' }}>
+                        <label className="label-sm">Base Font Size: {baseFontSize}px</label>
+                        <input 
+                           type="range" min="8" max="24" value={baseFontSize} 
+                           onChange={(e) => setBaseFontSize(parseInt(e.target.value))} 
+                           className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                        />
+                        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>This scales all text in the document proportionately.</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="side-label"><LayoutTemplate size={14} /> Page Background</label>
+                      <div className="editor-card" style={{ padding: '24px', display: 'flex', gap: '24px' }}>
+                        <button 
+                          onClick={() => setPageBgColor('#FFFFFF')}
+                          style={{ 
+                            flex: 1, height: '40px', borderRadius: '8px', 
+                            background: 'white', color: '#1e293b', border: pageBgColor === '#FFFFFF' ? '2px solid var(--brand-primary)' : '1px solid #e2e8f0',
+                            fontSize: '11px', fontWeight: 800, cursor: 'pointer'
+                          }}
+                        >
+                          WHITE
+                        </button>
+                        <button 
+                          onClick={() => setPageBgColor('#F5F3FF')}
+                          style={{ 
+                            flex: 1, height: '40px', borderRadius: '8px', 
+                            background: '#F5F3FF', color: '#7c3aed', border: pageBgColor === '#F5F3FF' ? '2px solid var(--brand-primary)' : '1px solid #ddd6fe',
+                            fontSize: '11px', fontWeight: 800, cursor: 'pointer'
+                          }}
+                        >
+                          PURPLE
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="side-label"><Sun size={14} /> Appearance</label>
+                      <div className="editor-card" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="label-sm" style={{ marginBottom: 0 }}>Dark Mode</span>
+                        <button 
+                           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                           style={{ padding: '8px 16px', borderRadius: '8px', background: 'var(--brand-primary)', color: 'white' }}
+                        >
+                           {theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
               <button 
-                onClick={() => setShowPreview(!showPreview)} 
-                className="btn-ghost" 
-                style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                onClick={() => addBlock('RICHTEXT')} 
+                style={{ 
+                  padding: '24px', 
+                  border: '2px dashed var(--border-subtle)', 
+                  borderRadius: '16px', 
+                  background: 'rgba(255,255,255,0.02)', 
+                  color: 'var(--text-muted)', 
+                  cursor: 'pointer', 
+                  fontWeight: 600, 
+                  transition: 'all 0.3s ease',
+                  marginTop: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                className="hover-brand-glow"
               >
-                {showPreview ? <EyeOff size={16} /> : <Eye size={16} />}
-                {showPreview ? 'Hide Preview' : 'Show Preview'}
+                <Plus size={24} style={{ opacity: 0.5 }} />
+                <span style={{ fontSize: '13px' }}>Add a new section from the sidebar or click here for Text</span>
               </button>
             </div>
-
-            {blocks.map((block, idx) => (
-              <EditorBlock 
-                key={block.id}
-                block={block}
-                idx={idx}
-                isLast={idx === blocks.length - 1}
-                updateBlock={updateBlock}
-                removeBlock={removeBlock}
-                moveBlock={moveBlock}
-                handleBlockImageUpload={handleBlockImageUpload}
-                handleTableCompanyLogoUpload={handleTableCompanyLogoUpload}
-              />
-            ))}
-            
-            {activeTab === 'settings' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '40px' }}>
-                 <div>
-                   <label className="side-label"><Settings size={14} /> Global Styling</label>
-                   <div className="editor-card" style={{ padding: '24px' }}>
-                     <label className="label-sm">Base Font Size: {baseFontSize}px</label>
-                     <input 
-                        type="range" min="8" max="24" value={baseFontSize} 
-                        onChange={(e) => setBaseFontSize(parseInt(e.target.value))} 
-                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                     />
-                     <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>This scales all text in the document proportionately.</p>
-                   </div>
-                 </div>
-
-                 <div>
-                   <label className="side-label"><Sun size={14} /> Appearance</label>
-                   <div className="editor-card" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                     <span className="label-sm" style={{ marginBottom: 0 }}>Dark Mode</span>
-                     <button 
-                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                        style={{ padding: '8px 16px', borderRadius: '8px', background: 'var(--brand-primary)', color: 'white' }}
-                     >
-                        {theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}
-                     </button>
-                   </div>
-                 </div>
-              </div>
-            )}
-            
-            <button 
-              onClick={() => addBlock('RICHTEXT')} 
-              style={{ padding: '32px', border: '2px dashed var(--border-subtle)', borderRadius: '16px', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 600, transition: 'all 0.2s' }}
-              className="hover-brand"
-            >
-              + Click to add another section from the sidebar
-            </button>
-          </div>
-        </main>
+          </main>
+        )}
 
         {/* RESIZER 2 */}
-        {showPreview && (
+        {showPreview && !isMobile && (
           <div onMouseDown={() => setIsResizingPreview(true)} style={{ width: '4px', cursor: 'col-resize', background: isResizingPreview ? 'var(--brand-primary)' : 'transparent', zIndex: 10 }} />
         )}
 
         {/* LIVE PREVIEW PANEL */}
-        {showPreview && (
-          <aside style={{ width: previewWidth, minWidth: '400px', background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+        {showPreview && (!isMobile || mobileActivePanel === 'preview') && (
+          <aside 
+            className="preview-panel"
+            style={{ 
+              width: isMobile ? '100%' : previewWidth, 
+              minWidth: isMobile ? 'none' : '400px', 
+              background: 'var(--bg-secondary)', 
+              borderLeft: isMobile ? 'none' : '1px solid var(--border-subtle)', 
+              display: 'flex', 
+              flexDirection: 'column' 
+            }}
+          >
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-muted)' }}>LIVE PDF PREVIEW</span>
-               <button onClick={() => setShowPreview(false)} className="btn-ghost" style={{ padding: '4px' }}><EyeOff size={16}/></button>
+               {!isMobile && <button onClick={() => setShowPreview(false)} className="btn-ghost" style={{ padding: '4px' }}><EyeOff size={16}/></button>}
             </div>
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: '#fff' }}>
                   <PDFViewer width="100%" height="100%" style={{ border: 'none' }} showToolbar={false}>
                     <PDFDocument 
-                      blocks={debouncedBlocks} 
-                      headerLogo={debouncedLogo} 
+                      blocks={deferredBlocks} 
+                      headerLogo={deferredLogo} 
                       headerAlign={headerAlign} 
                       headerVAlign={headerVAlign}
                       baseFontSize={baseFontSize}
+                      pageBgColor={pageBgColor}
                     />
                   </PDFViewer>
 
@@ -928,11 +1335,130 @@ export default function PolicyEditor() {
                       </div>
                     </div>
                   )}
-               </div>
+                </div>
             </div>
           </aside>
         )}
       </div>
+
+      {/* MOBILE BOTTOM NAVIGATION */}
+      {isMobile && (
+        <div style={{ 
+          height: '60px', 
+          background: 'var(--glass-bg)', 
+          backdropFilter: 'blur(20px)',
+          borderTop: '1px solid var(--border-subtle)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-around',
+          zIndex: 100 
+        }}>
+          {(['sidebar', 'editor', 'preview'] as const).map(panel => (
+            <button
+              key={panel}
+              onClick={() => setMobileActivePanel(panel)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'transparent',
+                border: 'none',
+                color: mobileActivePanel === panel ? 'var(--brand-primary)' : 'var(--text-muted)',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              {panel === 'sidebar' && <LayoutTemplate size={20} />}
+              {panel === 'editor' && <Type size={20} />}
+              {panel === 'preview' && <Eye size={20} />}
+              <span style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase' }}>{panel === 'sidebar' ? 'Assets' : panel}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* CUSTOM GLASSMORPHIC DIALOG */}
+      {dialog.isOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: theme === 'dark' ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.8)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '24px',
+            width: '90%', maxWidth: '400px',
+            padding: '32px',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+            animation: 'modalSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+          }}>
+            <h3 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '12px', color: 'var(--text-primary)' }}>{dialog.title}</h3>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>{dialog.message}</p>
+            
+            {dialog.type === 'PROMPT' && (
+              <input 
+                autoFocus
+                value={dialog.inputValue}
+                onChange={(e) => setDialog(prev => ({ ...prev, inputValue: e.target.value }))}
+                style={{ 
+                  width: '100%', padding: '12px 16px', borderRadius: '12px', 
+                  marginBottom: '24px', background: 'rgba(0,0,0,0.05)',
+                  fontSize: '15px'
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && dialog.onConfirm(dialog.inputValue)}
+              />
+            )}
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              {(dialog.type === 'CONFIRM' || dialog.type === 'PROMPT') && (
+                <button 
+                  onClick={dialog.onCancel} 
+                  className="btn-ghost" 
+                  style={{ padding: '12px 24px', borderRadius: '12px', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+              )}
+              <button 
+                onClick={() => dialog.onConfirm(dialog.inputValue)}
+                style={{ 
+                  padding: '12px 24px', borderRadius: '12px', 
+                  background: 'var(--brand-primary)', color: 'white', 
+                  fontWeight: 700, border: 'none', cursor: 'pointer',
+                  boxShadow: '0 8px 16px -4px rgba(59, 130, 246, 0.4)'
+                }}
+              >
+                {dialog.type === 'ALERT' ? 'Got it' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ANIMATIONS */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes modalSlideUp { 
+          from { opacity: 0; transform: translateY(20px) scale(0.95); } 
+          to { opacity: 1; transform: translateY(0) scale(1); } 
+        }
+        .hover-brand-glow:hover {
+          background: rgba(59, 130, 246, 0.05) !important;
+          border-color: var(--brand-primary) !important;
+          color: var(--brand-primary) !important;
+          box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+          transform: translateY(-2px);
+        }
+        .hover-brand-glow:hover svg {
+          opacity: 1 !important;
+          transform: scale(1.1);
+          transition: all 0.3s ease;
+        }
+      `}} />
     </div>
   );
 }

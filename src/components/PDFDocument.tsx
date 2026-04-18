@@ -19,13 +19,17 @@ Font.register({
   ],
 });
 
+const getInitials = (name: string) => {
+  if (!name) return 'PL';
+  return name.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().substring(0, 2);
+};
+
 const styles = StyleSheet.create({
   page: {
     padding: 60,
     fontFamily: 'Helvetica', // Default to safe built-in font
     fontSize: 11,
     color: '#1e293b',
-    backgroundColor: '#ffffff',
   },
   header: {
     position: 'absolute',
@@ -144,6 +148,7 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     display: 'flex',
     flexDirection: 'column',
+    alignItems: 'center',
   },
   lastCell: {
     borderRightWidth: 0,
@@ -157,7 +162,20 @@ const styles = StyleSheet.create({
   },
   tableLogo: {
     objectFit: 'contain',
-    marginBottom: 4,
+    width: 60,
+  },
+  tableLogoFallback: {
+    width: 60,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 4,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackText: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: '#64748b',
   },
   listItem: {
     flexDirection: 'row',
@@ -198,7 +216,9 @@ const cleanHTML = (html: string) => {
 
 // --- MEMOIZED PDF BLOCK ---
 const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styles: any, cleanStyle: (s: any) => any }) => {
-  if (block.type === 'RICHTEXT') {
+  const parsedContent = React.useMemo(() => {
+    if (block.type !== 'RICHTEXT') return null;
+    
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleanHTML(block.htmlContent || ''), 'text/html');
     
@@ -270,17 +290,21 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
       return null;
     };
 
-    const parsedContent: React.ReactNode[] = [];
+    const content: React.ReactNode[] = [];
     Array.from(doc.body.childNodes).forEach((node, i) => {
       const rendered = walk(node, styles.paragraph, `root-${i}`);
-      if (rendered) parsedContent.push(rendered);
+      if (rendered) content.push(rendered);
     });
 
     return (
       <View style={{ marginTop: 20 }}>
-        {parsedContent}
+        {content}
       </View>
     );
+  }, [block.htmlContent, styles, cleanStyle]);
+
+  if (block.type === 'RICHTEXT') {
+    return parsedContent;
   }
 
   if (block.type === 'IMAGE' && block.imageUrl) {
@@ -323,9 +347,15 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
         <View style={[styles.tableRow, styles.tableHeader]}>
           {block.companies.map((c, idx) => (
             <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell, { alignItems: 'center' }]}>
-              {c.logoUrl && (
-                <Image src={c.logoUrl} style={[styles.tableLogo, { height: safeNum(block.tableLogoSize, 30) }]} />
-              )}
+              <View style={{ height: safeNum(block.tableLogoSize, 30), marginBottom: 4, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                {c.logoUrl && c.logoUrl.startsWith('data:') ? (
+                  <Image src={c.logoUrl} style={[styles.tableLogo, { height: safeNum(block.tableLogoSize, 30), width: 'auto' }]} />
+                ) : (
+                  <View style={[styles.tableLogoFallback, { height: safeNum(block.tableLogoSize, 30) }]}>
+                    <Text style={styles.fallbackText}>{getInitials(c.name || 'PL')}</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.tableName}>{c.name}</Text>
             </View>
           ))}
@@ -335,7 +365,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
             <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell]}>
               {c.benefits.split('\n').filter(b => b.trim()).map((benefit, bIdx) => (
                 <View key={bIdx} style={[styles.listItem, { width: '100%' }]}>
-                  <Text style={styles.bullet}>•</Text>
+                  {block.showTableBullets !== false && <Text style={styles.bullet}>•</Text>}
                   <Text style={[styles.listText, { fontSize: safeNum(block.tableTextSize, 10) }]}>{benefit}</Text>
                 </View>
               ))}
@@ -362,10 +392,13 @@ interface Block {
   htmlContent?: string;
   imageUrl?: string;
   imageWidth?: number;
+  imageRadius?: number;
   imageAlign?: string;
+  isBackground?: boolean;
   companies?: Company[];
   tableLogoSize?: number;
   tableTextSize?: number;
+  showTableBullets?: boolean;
 }
 
 interface PDFDocumentProps {
@@ -374,9 +407,10 @@ interface PDFDocumentProps {
   headerAlign?: 'left' | 'center' | 'right';
   headerVAlign?: 'TOP' | 'BOTTOM';
   baseFontSize?: number;
+  pageBgColor?: string;
 }
 
-export const PDFDocument = ({ blocks, headerLogo, headerAlign, headerVAlign, baseFontSize = 11 }: PDFDocumentProps) => {
+export const PDFDocument = ({ blocks, headerLogo, headerAlign, headerVAlign, baseFontSize = 11, pageBgColor = '#F5F3FF' }: PDFDocumentProps) => {
   // Split blocks into physical pages
   const pages: Block[][] = [];
   let currentPage: Block[] = [];
@@ -400,7 +434,7 @@ export const PDFDocument = ({ blocks, headerLogo, headerAlign, headerVAlign, bas
   return (
     <Document>
       {pages.map((pBlocks, pIdx) => (
-        <Page key={pIdx} size="A4" style={[styles.page, { fontSize: safeNum(baseFontSize, 11) }]}>
+        <Page key={pIdx} size="A4" style={[styles.page, { fontSize: safeNum(baseFontSize, 11), backgroundColor: pageBgColor }]}>
           {/* Header Logo */}
           {headerLogo && headerVAlign !== 'BOTTOM' && (
             <View fixed style={[styles.header, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
