@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable jsx-a11y/alt-text */
 
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Image, Font, Svg, Path } from '@react-pdf/renderer';
@@ -304,7 +305,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
         {content}
       </View>
     );
-  }, [block.htmlContent, styles, cleanStyle]);
+  }, [block.type, block.htmlContent, styles, cleanStyle]);
 
   if (block.type === 'RICHTEXT') {
     return parsedContent;
@@ -334,7 +335,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
       );
     }
     return (
-      <View style={{ alignItems: (block.imageAlign as 'left' | 'center' | 'right') || 'center', marginTop: 20 }}>
+      <View style={{ alignItems: block.imageAlign === 'left' ? 'flex-start' : block.imageAlign === 'right' ? 'flex-end' : 'center', marginTop: 20 }}>
         <Image src={block.imageUrl} style={imgStyle} />
       </View>
     );

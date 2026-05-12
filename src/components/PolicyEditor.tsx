@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import dynamic from 'next/dynamic';
 import * as XLSX from 'xlsx';
 import 'react-quill-new/dist/quill.snow.css';
 import { 
-  Plus, Trash2, Download, Printer, Eye, EyeOff, Image as ImageIcon, 
-  Table as TableIcon, Type, Settings, Layers, GripVertical, CheckCircle,
+  Plus, Trash2, Download, Eye, EyeOff, Image as ImageIcon, 
+  Table as TableIcon, Type, Settings, GripVertical, CheckCircle,
   LayoutTemplate, Sun, Moon, Save, FileOutput, AlertCircle, Check, X, XCircle, FileSpreadsheet
 } from 'lucide-react';
 import { PDFDownloadLink } from '@react-pdf/renderer';
@@ -43,7 +43,7 @@ const idbGet = async (key: string) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => resolve(null);
     });
-  } catch (e) { return null; }
+  } catch { return null; }
 };
 
 const idbSet = async (key: string, value: unknown) => {
@@ -212,6 +212,7 @@ const EditorBlock = React.memo(({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
               <div style={{ width: isMobile ? '100%' : '200px', height: isMobile ? 'auto' : '200px', minHeight: isMobile ? '160px' : '200px', background: 'white', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 {localImageUrl ? <img src={localImageUrl} alt="Block Content" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <ImageIcon size={48} color="#94a3b8" />}
               </div>
               <div style={{ flex: 1, minWidth: '240px' }}>
@@ -298,6 +299,7 @@ const EditorBlock = React.memo(({
                       {/* LOGO PREVIEW */}
                       <div style={{ width: '100%', height: '60px', background: 'white', borderRadius: '8px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(0,0,0,0.1)' }}>
                         {c.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={c.logoUrl} alt="Logo" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
                         ) : (
                           <ImageIcon size={20} color="#cbd5e1" />
@@ -412,12 +414,12 @@ export default function PolicyEditor() {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [lastSaved, setLastSaved] = useState<string>('');
-  const [isUploading, setIsUploading] = useState(false);
+
   const [logoStatuses, setLogoStatuses] = useState<Record<string, 'LOADING' | 'VERIFIED' | 'WEB_ONLY' | 'ERROR' | ''>>({});
   const [activeTab, setActiveTab] = useState<'blocks' | 'variables' | 'settings' | 'templates'>('blocks');
   const [showPreview, setShowPreview] = useState(true);
   const [baseFontSize, setBaseFontSize] = useState(11);
-  const [quotaError, setQuotaError] = useState(false);
+
   const [pageBgColor, setPageBgColor] = useState('#F5F3FF'); // Default to light purple
   const [isMobile, setIsMobile] = useState(false);
   const [mobileActivePanel, setMobileActivePanel] = useState<'sidebar' | 'editor' | 'preview'>('editor');
@@ -581,10 +583,10 @@ export default function PolicyEditor() {
         localStorage.setItem('pb-theme', theme);
         localStorage.setItem('pb-base-font', baseFontSize.toString());
         localStorage.setItem('pb-page-color', pageBgColor);
-        setQuotaError(false);
+
       } catch (e) {
         console.error('Storage Error:', e);
-        setQuotaError(true);
+
       }
       
       const now = new Date().toLocaleTimeString();
@@ -592,7 +594,7 @@ export default function PolicyEditor() {
     }, 1500);
 
     return () => clearTimeout(timeoutId);
-  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, theme, baseFontSize, pageBgColor]);
+  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, templates, theme, baseFontSize, pageBgColor]);
 
   // RESIZING LOGIC
   useEffect(() => {
@@ -670,12 +672,14 @@ export default function PolicyEditor() {
   }, []);
 
   const moveBlock = useCallback((idx: number, dir: 'UP' | 'DOWN') => {
-    const nextIdx = dir === 'UP' ? idx - 1 : idx + 1;
-    if (nextIdx < 0 || nextIdx >= blocks.length) return;
-    const next = [...blocks];
-    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
-    setBlocks(next);
-  }, [blocks.length]);
+    setBlocks(prev => {
+      const nextIdx = dir === 'UP' ? idx - 1 : idx + 1;
+      if (nextIdx < 0 || nextIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+      return next;
+    });
+  }, []);
 
   // HIGH-PERFORMANCE PDF SYNC ENGINE (Debounced)
   const replaceVars = useCallback((text: string) => {
@@ -783,7 +787,7 @@ export default function PolicyEditor() {
   const handleTableCompanyLogoUpload = async (blockIndex: number, companyIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setIsUploading(true);
+
     const reader = new FileReader();
     reader.onload = async () => {
       const compressed = await compressImage(reader.result as string);
@@ -792,7 +796,7 @@ export default function PolicyEditor() {
       companies[companyIndex].logoUrl = compressed;
       next[blockIndex].companies = companies;
       setBlocks(next);
-      setIsUploading(false);
+
     };
     reader.readAsDataURL(file);
   };
@@ -864,32 +868,32 @@ export default function PolicyEditor() {
       
       // If there were rows before the header, use them as title/subtitle too
       if (headerRowIndex > 0) {
-        if (!tableTitle) tableTitle = allData[0][0] || '';
-        else tableSubtitle = allData[0][0] || '';
+        if (!tableTitle) tableTitle = String(allData[0][0] || '');
+        else tableSubtitle = String(allData[0][0] || '');
       }
 
       // Capture any intermediate rows as subtitle
       for (let k = 1; k < headerRowIndex; k++) {
-        if (allData[k][0]) tableSubtitle += (tableSubtitle ? ' | ' : '') + allData[k][0];
+        if (allData[k][0]) tableSubtitle += (tableSubtitle ? ' | ' : '') + String(allData[k][0]);
       }
 
       // NEW: Check if the row immediately after header is a subtitle (only has Col A)
       if (allData.length > 1 && allData[1][0] && !allData[1][1] && !allData[1][2]) {
-        tableSubtitle += (tableSubtitle ? ' | ' : '') + allData[1][0];
+        tableSubtitle += (tableSubtitle ? ' | ' : '') + String(allData[1][0]);
       }
 
       const companies: Company[] = [];
 
       // Map columns to companies
       for (let i = 1; i < headers.length; i++) {
-        const name = headers[i] || `Plan ${i}`;
+        const name = String(headers[i] || `Plan ${i}`);
         let benefits = '';
         for (let j = 1; j < data.length; j++) {
           const row = data[j];
           if (!row || !Array.isArray(row) || row.length === 0) continue;
           
-          const benefitName = row[0] || `Feature ${j}`;
-          const value = row[i] !== undefined ? row[i] : '';
+          const benefitName = String(row[0] || `Feature ${j}`);
+          const value = row[i] !== undefined ? String(row[i]) : '';
           
           // SKIP ROWS THAT ARE EMPTY ACROSS ALL PLAN COLUMNS
           const rowValues = row.slice(1);
@@ -956,6 +960,7 @@ export default function PolicyEditor() {
         <div suppressHydrationWarning style={{ position: 'relative', width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500/10 rounded-full" style={{ borderStyle: 'dashed' }}></div>
           <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img suppressHydrationWarning src="/icon.png" alt="Sree Insurance" style={{ width: '40px', height: '40px', borderRadius: '8px', zIndex: 2 }} />
         </div>
         <div suppressHydrationWarning style={{ textAlign: 'center' }}>
@@ -1066,6 +1071,7 @@ export default function PolicyEditor() {
       <nav className="glass-nav" style={{ height: '70px', display: 'flex', alignItems: 'center', padding: '0 32px', justifyContent: 'space-between', zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/icon.png" alt="Sree Insurance Logo" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain' }} />
           </div>
           <div>
@@ -1139,6 +1145,7 @@ export default function PolicyEditor() {
               <div className="animate-fade">
                 <div className="side-label"><ImageIcon size={14} /> Global Logo</div>
                 <div style={{ background: '#fff', borderRadius: '12px', padding: '12px', marginBottom: '16px', border: '1px solid var(--border-subtle)' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   {headerLogoUrl ? <img src={headerLogoUrl} alt="Header Logo" style={{ maxHeight: '40px', maxWidth: '100%', objectFit: 'contain' }} /> : <div style={{ height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '11px' }}>No Logo</div>}
                 </div>
                 <label className="action-pill" style={{ marginBottom: '12px' }}>
@@ -1626,7 +1633,7 @@ export default function PolicyEditor() {
                 <thead>
                   <tr>
                     {excelPreview.data[0]?.map((h, i) => (
-                      <th key={i} style={{ padding: '12px', textAlign: 'left', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', fontWeight: 800 }}>{h}</th>
+                      <th key={i} style={{ padding: '12px', textAlign: 'left', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', fontWeight: 800 }}>{String(h || '')}</th>
                     ))}
                   </tr>
                 </thead>
