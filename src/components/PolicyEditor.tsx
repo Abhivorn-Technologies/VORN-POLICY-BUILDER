@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
 import dynamic from 'next/dynamic';
+import * as XLSX from 'xlsx';
 import 'react-quill-new/dist/quill.snow.css';
 import { 
   Plus, Trash2, Download, Printer, Eye, EyeOff, Image as ImageIcon, 
   Table as TableIcon, Type, Settings, Layers, GripVertical, CheckCircle,
-  LayoutTemplate, Sun, Moon, Save, FileOutput, AlertCircle
+  LayoutTemplate, Sun, Moon, Save, FileOutput, AlertCircle, Check, X, XCircle, FileSpreadsheet
 } from 'lucide-react';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
@@ -93,9 +94,9 @@ interface Block {
   imageRadius?: number;
   isBackground?: boolean;
   companies?: Company[];
-  tableLogoSize?: number;
-  tableTextSize?: number;
   showTableBullets?: boolean;
+  tableTitle?: string;
+  tableSubtitle?: string;
 }
 
 interface Variable {
@@ -126,7 +127,7 @@ interface DialogState {
 // --- MEMOIZED BLOCK COMPONENT ---
 const EditorBlock = React.memo(({ 
   block, idx, isLast, updateBlock, removeBlock, moveBlock, handleBlockImageUpload, handleTableCompanyLogoUpload,
-  handleLogoUrlChange, logoStatuses
+  handleExcelUpload, logoStatuses, handleLogoUrlChange
 }: {
   block: Block, idx: number, isLast: boolean,
   updateBlock: (id: string, updates: Partial<Block>) => void,
@@ -134,6 +135,7 @@ const EditorBlock = React.memo(({
   moveBlock: (idx: number, dir: 'UP' | 'DOWN') => void,
   handleBlockImageUpload: (idx: number, e: any) => void,
   handleTableCompanyLogoUpload: (idx: number, cIdx: number, e: any) => void,
+  handleExcelUpload: (blockId: string, e: any) => void,
   logoStatuses: Record<string, string>,
   handleLogoUrlChange: (url: string, id: string, callback: (final: string) => void) => Promise<void>
 }) => {
@@ -345,23 +347,54 @@ const EditorBlock = React.memo(({
                           ✅ <strong>PDF Ready:</strong> Image successfully processed for export.
                         </div>
                       )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {c.benefits.split('\n').filter(b => b.trim()).map((benefit, bIdx) => {
+                          const hasTick = /\[tick\]|\[check\]|\[yes\]/i.test(benefit);
+                          const hasCross = /\[cross\]|\[x\]|\[no\]/i.test(benefit);
+                          const cleanText = benefit.replace(/\[tick\]|\[check\]|\[yes\]|\[cross\]|\[x\]|\[no\]/gi, '').trim();
+                          
+                          return (
+                            <div key={bIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                              {hasTick ? (
+                                <Check size={14} color="#10B981" strokeWidth={3} />
+                              ) : hasCross ? (
+                                <X size={14} color="#EF4444" strokeWidth={3} />
+                              ) : (
+                                <span style={{ opacity: 0.5 }}>•</span>
+                              )}
+                              <span>{cleanText || (hasTick ? 'Yes' : hasCross ? 'No' : benefit)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                       <textarea value={c.benefits} onChange={(e) => {
                         const nc = [...block.companies!];
                         nc[cIdx].benefits = e.target.value;
                         updateBlock(block.id, { companies: nc });
-                      }} rows={4} style={{ width: '100%', fontSize: '12px' }} placeholder="Benefits (one per line)" />
+                      }} rows={4} style={{ width: '100%', fontSize: '12px', marginTop: '8px' }} placeholder="Benefits (one per line, use [tick] or [cross])" />
                       <label className="action-pill" style={{ marginTop: '12px', width: '100%', justifyContent: 'center' }}>
                         <ImageIcon size={14} /> Upload Plan Logo
                         <input type="file" hidden onChange={(e) => handleTableCompanyLogoUpload(idx, cIdx, e)} />
                       </label>
                     </div>
                 ))}
-                <button 
-                  onClick={() => updateBlock(block.id, { companies: [...(block.companies || []), { id: Date.now().toString(), name: 'New Plan', benefits: '', logoUrl: '' }] })}
-                  style={{ minWidth: '200px', border: '2px dashed var(--border-subtle)', borderRadius: '12px', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}
-                >
-                  + Add Plan
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '200px' }}>
+                  <button 
+                    onClick={() => updateBlock(block.id, { companies: [...(block.companies || []), { id: Date.now().toString(), name: 'New Plan', benefits: '', logoUrl: '' }] })}
+                    style={{ width: '100%', border: '2px dashed var(--border-subtle)', borderRadius: '12px', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', padding: '16px', fontWeight: 700 }}
+                  >
+                    + Add Plan
+                  </button>
+                  <label style={{ 
+                    width: '100%', border: '2px dashed var(--brand-primary)', borderRadius: '12px', 
+                    background: 'rgba(59, 130, 246, 0.05)', color: 'var(--brand-primary)', 
+                    cursor: 'pointer', padding: '16px', display: 'flex', alignItems: 'center', 
+                    justifyContent: 'center', gap: '8px', fontSize: '13px', fontWeight: 700 
+                  }}>
+                    <TableIcon size={18} /> Import Excel
+                    <input type="file" hidden accept=".xlsx, .xls, .csv" onChange={(e) => handleExcelUpload(block.id, e)} />
+                  </label>
+                </div>
              </div>
           </div>
         )}
@@ -386,6 +419,7 @@ export default function PolicyEditor() {
   const [pageBgColor, setPageBgColor] = useState('#F5F3FF'); // Default to light purple
   const [isMobile, setIsMobile] = useState(false);
   const [mobileActivePanel, setMobileActivePanel] = useState<'sidebar' | 'editor' | 'preview'>('editor');
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
 
   // CORE STATE
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -397,6 +431,10 @@ export default function PolicyEditor() {
   const [variables, setVariables] = useState<Variable[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [excelPreview, setExcelPreview] = useState<{ isOpen: boolean, data: any[][], targetBlockId?: string }>({
+    isOpen: false,
+    data: [],
+  });
 
   // CUSTOM DIALOG STATE
   const [dialog, setDialog] = useState<DialogState>({
@@ -754,6 +792,158 @@ export default function PolicyEditor() {
     reader.readAsDataURL(file);
   };
 
+  const handleExcelUpload = (blockId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const dataBuffer = event.target?.result;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as any[][];
+        
+        if (data.length === 0) {
+          openDialog({ type: 'ALERT', title: 'Empty File', message: 'The uploaded excel sheet appears to be empty.', onConfirm: closeDialog });
+          return;
+        }
+        
+        setExcelPreview({ isOpen: true, data, targetBlockId: blockId });
+        e.target.value = ''; // Reset input to allow re-uploading same file
+      } catch (err) {
+        console.error('Excel Parse Error:', err);
+        openDialog({ type: 'ALERT', title: 'Error', message: 'Failed to parse the Excel file. Please ensure it is a valid .xlsx or .xls file.', onConfirm: closeDialog });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const confirmExcelImport = () => {
+    try {
+      if (excelPreview.data.length === 0) {
+        console.warn('Import failed: No data');
+        return;
+      }
+
+      const allData = excelPreview.data;
+      
+      // Find the first row that actually has multiple columns (the headers)
+      let headerRowIndex = 0;
+      while (headerRowIndex < allData.length && (!allData[headerRowIndex] || allData[headerRowIndex].length <= 1)) {
+        headerRowIndex++;
+      }
+
+      if (headerRowIndex >= allData.length) {
+        openDialog({ 
+          type: 'ALERT', 
+          title: 'Invalid Format', 
+          message: 'Could not find a valid data table in the excel sheet. Please ensure you have columns for your plans.', 
+          onConfirm: closeDialog 
+        });
+        return;
+      }
+
+      const headers = allData[headerRowIndex];
+      const data = allData.slice(headerRowIndex);
+      
+      // CAPTURE TITLES
+      let tableTitle = '';
+      let tableSubtitle = '';
+      
+      // If the first cell of the header row has a title (like the customer name)
+      if (headers[0] && String(headers[0]).length > 0) {
+        tableTitle = String(headers[0]);
+      }
+      
+      // If there were rows before the header, use them as title/subtitle too
+      if (headerRowIndex > 0) {
+        if (!tableTitle) tableTitle = allData[0][0] || '';
+        else tableSubtitle = allData[0][0] || '';
+      }
+
+      // Capture any intermediate rows as subtitle
+      for (let k = 1; k < headerRowIndex; k++) {
+        if (allData[k][0]) tableSubtitle += (tableSubtitle ? ' | ' : '') + allData[k][0];
+      }
+
+      // NEW: Check if the row immediately after header is a subtitle (only has Col A)
+      if (allData.length > 1 && allData[1][0] && !allData[1][1] && !allData[1][2]) {
+        tableSubtitle += (tableSubtitle ? ' | ' : '') + allData[1][0];
+      }
+
+      const companies: Company[] = [];
+
+      // Map columns to companies
+      for (let i = 1; i < headers.length; i++) {
+        const name = headers[i] || `Plan ${i}`;
+        let benefits = '';
+        for (let j = 1; j < data.length; j++) {
+          const row = data[j];
+          if (!row || !Array.isArray(row) || row.length === 0) continue;
+          
+          const benefitName = row[0] || `Feature ${j}`;
+          const value = row[i] !== undefined ? row[i] : '';
+          
+          // SKIP ROWS THAT ARE EMPTY ACROSS ALL PLAN COLUMNS
+          const rowValues = row.slice(1);
+          const hasAnyValue = rowValues.some(v => v !== undefined && v !== null && String(v).trim() !== '');
+          if (!hasAnyValue) continue;
+
+          // Handle boolean-like values for tick/cross
+          let valStr = String(value).trim().toLowerCase();
+          const isExplicitBoolean = ['yes', 'no', 'true', 'false', 'check', 'tick', 'cross', 'x'].includes(valStr);
+          
+          if (isExplicitBoolean) {
+            if (valStr === 'yes' || valStr === 'true' || valStr === 'check' || valStr === 'tick') {
+              benefits += `${benefitName} [tick]\n`;
+            } else {
+              benefits += `${benefitName} [cross]\n`;
+            }
+          } else {
+            benefits += `${benefitName}: ${value}\n`;
+          }
+        }
+        companies.push({
+          id: Date.now().toString() + i + Math.random().toString(36).substr(2, 5),
+          name,
+          logoUrl: '',
+          benefits: benefits.trim()
+        });
+      }
+
+      if (excelPreview.targetBlockId) {
+        updateBlock(excelPreview.targetBlockId, { companies, tableTitle, tableSubtitle });
+      } else {
+        // Create a new block if imported from sidebar
+        const newBlock: Block = {
+          id: Date.now().toString(),
+          type: 'COMPARISON_TABLE',
+          companies: companies,
+          tableTitle,
+          tableSubtitle,
+          tableLogoSize: 30,
+          tableTextSize: 10,
+          showTableBullets: true
+        };
+        setBlocks(prev => [...prev, newBlock]);
+      }
+
+      setExcelPreview({ isOpen: false, data: [] });
+      
+      openDialog({
+        type: 'ALERT',
+        title: 'Import Successful',
+        message: `Successfully imported ${companies.length} plans from Excel.`,
+        onConfirm: closeDialog
+      });
+    } catch (err) {
+      console.error('Final Import Error:', err);
+      openDialog({ type: 'ALERT', title: 'Import Error', message: 'Something went wrong during the final import step.', onConfirm: closeDialog });
+    }
+  };
+
   // RENDER (ULTRA-FAST LOADING SCREEN)
   if (!isMounted || !isDataLoaded) {
     return (
@@ -761,13 +951,13 @@ export default function PolicyEditor() {
         <div suppressHydrationWarning style={{ position: 'relative', width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500/10 rounded-full" style={{ borderStyle: 'dashed' }}></div>
           <div suppressHydrationWarning className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <img suppressHydrationWarning src="/icon.png" alt="VORN" style={{ width: '40px', height: '40px', borderRadius: '8px', zIndex: 2 }} />
+          <img suppressHydrationWarning src="/icon.png" alt="Sree Insurance" style={{ width: '40px', height: '40px', borderRadius: '8px', zIndex: 2 }} />
         </div>
         <div suppressHydrationWarning style={{ textAlign: 'center' }}>
-          <h1 suppressHydrationWarning className="font-title" style={{ fontSize: '24px', letterSpacing: '4px', marginBottom: '8px', opacity: 0.9 }}>VORN</h1>
+          <h1 suppressHydrationWarning className="font-title" style={{ fontSize: '24px', letterSpacing: '2px', marginBottom: '8px', opacity: 0.9 }}>SREE INSURANCE</h1>
           <p suppressHydrationWarning className="animate-pulse" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '2px', color: '#3b82f6', fontWeight: 800 }}>Initializing Premium Engine...</p>
         </div>
-        <div suppressHydrationWarning style={{ position: 'fixed', bottom: '40px', fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>VORN OPTIMIZED v2.0</div>
+        <div suppressHydrationWarning style={{ position: 'fixed', bottom: '40px', fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px' }}>SREE INSURANCE SERVICES v2.0</div>
       </div>
     );
   }
@@ -871,10 +1061,10 @@ export default function PolicyEditor() {
       <nav className="glass-nav" style={{ height: '70px', display: 'flex', alignItems: 'center', padding: '0 32px', justifyContent: 'space-between', zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ background: 'rgba(255,255,255,0.03)', padding: '6px', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img src="/icon.png" alt="VORN Logo" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain' }} />
+            <img src="/icon.png" alt="Sree Insurance Logo" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain' }} />
           </div>
           <div>
-            <h2 className="font-title" style={{ fontSize: isMobile ? '16px' : '22px' }}>VORN <span style={{ color: 'var(--brand-primary)' }}>Policy Builder</span></h2>
+            <h2 className="font-title" style={{ fontSize: isMobile ? '16px' : '22px' }}>Sree Insurance <span style={{ color: 'var(--brand-primary)' }}>Services</span></h2>
             {!isMobile && <p style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>PREMIUM DOCUMENT ENGINE</p>}
           </div>
         </div>
@@ -890,7 +1080,7 @@ export default function PolicyEditor() {
             
             {isMounted && (
               <PDFDownloadLink 
-                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={baseFontSize} pageBgColor={pageBgColor} />} 
+                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={baseFontSize} pageBgColor={pageBgColor} orientation={orientation} />} 
                 fileName="PolicyProposal.pdf"
                 className="btn-primary"
                 style={{ padding: isMobile ? '10px 14px' : '12px 24px', fontSize: isMobile ? '11px' : '13px' }}
@@ -996,6 +1186,10 @@ export default function PolicyEditor() {
                   <button onClick={() => addBlock('RICHTEXT')} className="side-btn"><Type size={18} /> Text Block</button>
                   <button onClick={() => addBlock('IMAGE')} className="side-btn"><ImageIcon size={18} /> Image Block</button>
                   <button onClick={() => addBlock('COMPARISON_TABLE')} className="side-btn"><TableIcon size={18} /> Comparison Table</button>
+                  <label className="side-btn" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <FileSpreadsheet size={18} /> Excel Import
+                    <input type="file" hidden accept=".xlsx, .xls, .csv" onChange={(e) => handleExcelUpload('', e)} />
+                  </label>
                   <button onClick={() => addBlock('PAGE_BREAK')} className="side-btn"><FileOutput size={18} /> Page Break</button>
                 </div>
               </div>
@@ -1084,7 +1278,26 @@ export default function PolicyEditor() {
                     </p>
                   </div>
 
-                  <div className="side-label" style={{ marginTop: '24px' }}>Page Background</div>
+                  <div className="side-label" style={{ marginTop: '24px' }}>Page Orientation</div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    {(['portrait', 'landscape'] as const).map(o => (
+                      <button 
+                        key={o}
+                        onClick={() => setOrientation(o)}
+                        style={{ 
+                          flex: 1, padding: '12px', borderRadius: '12px', 
+                          background: orientation === o ? 'var(--brand-primary)' : 'var(--bg-primary)',
+                          color: orientation === o ? 'white' : 'var(--text-secondary)',
+                          border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                          fontSize: '11px', fontWeight: 700
+                        }}
+                      >
+                        {o.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="side-label" style={{ marginTop: '12px' }}>Page Background</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button 
                       onClick={() => setPageBgColor('#FFFFFF')} 
@@ -1188,12 +1401,13 @@ export default function PolicyEditor() {
                   moveBlock={moveBlock}
                   handleBlockImageUpload={handleBlockImageUpload}
                   handleTableCompanyLogoUpload={handleTableCompanyLogoUpload}
+                  handleExcelUpload={handleExcelUpload}
                   logoStatuses={logoStatuses}
                   handleLogoUrlChange={handleLogoUrlChange}
                 />
               ))}
               
-              <div style={{ activeTab: activeTab === 'settings' ? 'block' : 'none' as any }}>
+              <div style={{ display: activeTab === 'settings' ? 'block' : 'none' as any }}>
                 {activeTab === 'settings' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '40px' }}>
                     <div>
@@ -1208,6 +1422,8 @@ export default function PolicyEditor() {
                         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>This scales all text in the document proportionately.</p>
                       </div>
                     </div>
+
+
 
                     <div>
                       <label className="side-label"><LayoutTemplate size={14} /> Page Background</label>
@@ -1309,6 +1525,7 @@ export default function PolicyEditor() {
                       headerVAlign={headerVAlign}
                       baseFontSize={baseFontSize}
                       pageBgColor={pageBgColor}
+                      orientation={orientation}
                     />
                   </PDFViewer>
 
@@ -1375,6 +1592,65 @@ export default function PolicyEditor() {
               <span style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase' }}>{panel === 'sidebar' ? 'Assets' : panel}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* EXCEL PREVIEW MODAL */}
+      {excelPreview.isOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: theme === 'dark' ? '#1e293b' : '#ffffff',
+            borderRadius: '24px',
+            width: '90%', maxWidth: '900px', maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+            overflow: 'hidden'
+          }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 800 }}>Excel Data Preview</h3>
+              <button onClick={() => setExcelPreview({ isOpen: false, data: [] })} className="btn-ghost"><X size={20} /></button>
+            </div>
+            
+            <div style={{ flex: 1, overflow: 'auto', padding: '32px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr>
+                    {excelPreview.data[0]?.map((h, i) => (
+                      <th key={i} style={{ padding: '12px', textAlign: 'left', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', fontWeight: 800 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {excelPreview.data.slice(1).map((row, ri) => (
+                    <tr key={ri}>
+                      {Array.isArray(row) && row.map((cell, ci) => (
+                        <td key={ci} style={{ padding: '12px', border: '1px solid var(--border-subtle)' }}>{String(cell !== undefined ? cell : '')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ padding: '24px 32px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: '16px', justifyContent: 'flex-end', background: 'var(--bg-secondary)' }}>
+              <button onClick={() => setExcelPreview({ isOpen: false, data: [] })} className="btn-ghost" style={{ padding: '12px 24px', borderRadius: '12px' }}>Cancel</button>
+              <button 
+                onClick={confirmExcelImport}
+                style={{ 
+                  padding: '12px 32px', borderRadius: '12px', 
+                  background: 'var(--brand-primary)', color: 'white', 
+                  fontWeight: 700, border: 'none', cursor: 'pointer'
+                }}
+              >
+                Import into Table
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

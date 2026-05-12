@@ -1,8 +1,8 @@
-# VORN Policy Builder SaaS
+# Sree Insurance Services - Policy Builder SaaS
 
-A premium, high-performance document generation engine built for insurance and policy management professionals. VORN allows users to create, preview, and export pixel-perfect PDFs with zero latency.
+A premium, high-performance document generation engine built for insurance and policy management professionals. Sree Insurance Services allows users to create, preview, and export pixel-perfect PDFs with zero latency.
 
-![VORN Preview](public/vorn-preview.png) *(Note: Placeholder image ref)*
+![Sree Insurance Preview](public/preview.png) *(Note: Placeholder image ref)*
 
 ## ✨ Key Features
 
@@ -28,7 +28,7 @@ A premium, high-performance document generation engine built for insurance and p
 1. Clone the repository
 2. Navigate to the project directory:
    ```bash
-   cd vorn-policy-builder
+   cd sree-insurance-services
    ```
 3. Install dependencies:
    ```bash
@@ -53,9 +53,9 @@ npm run start
 This project is optimized for deployment on the **Vercel Platform**. 
 
 1. Push your code to GitHub.
-2. Import the `vorn-policy-builder` folder as a New Project in Vercel.
+2. Import the `sree-insurance-services` folder as a New Project in Vercel.
 3. No environment variables are required for the standalone editor.
 
 ## 🛡 License
 
-© 2024 VORN Tech. All Rights Reserved. Built for high-performance policy generation.
+© 2026 Sree Insurance Services. All Rights Reserved. Built for high-performance policy generation.

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VORN Policy Builder",
-  description: "Premium Policy Generation Engine",
+  title: "Sree Insurance Services",
+  description: "Premium Insurance Policy Generation Engine",
   icons: {
     icon: "/icon.png",
   },

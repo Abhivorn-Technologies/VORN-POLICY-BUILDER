@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet, Image, Font } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, Image, Font, Svg, Path } from '@react-pdf/renderer';
 
 // Register Fonts for a premium look
 Font.register({
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   },
   tableCell: {
     flex: 1,
-    padding: 10,
+    padding: 4,
     borderRightColor: '#e2e8f0',
     borderRightWidth: 1,
     display: 'flex',
@@ -343,34 +343,85 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
       return (typeof n === 'number' && isFinite(n)) ? n : fallback;
     };
     return (
-      <View wrap={true} style={[styles.table, { marginTop: 20 }]}>
-        <View style={[styles.tableRow, styles.tableHeader]}>
-          {block.companies.map((c, idx) => (
-            <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell, { alignItems: 'center' }]}>
-              <View style={{ height: safeNum(block.tableLogoSize, 30), marginBottom: 4, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                {c.logoUrl && c.logoUrl.startsWith('data:') ? (
-                  <Image src={c.logoUrl} style={[styles.tableLogo, { height: safeNum(block.tableLogoSize, 30), width: 'auto' }]} />
-                ) : (
-                  <View style={[styles.tableLogoFallback, { height: safeNum(block.tableLogoSize, 30) }]}>
-                    <Text style={styles.fallbackText}>{getInitials(c.name || 'PL')}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.tableName}>{c.name}</Text>
+      <View key={block.id} style={{ marginBottom: 20 }}>
+        {/* TABLE TITLE & SUBTITLE */}
+        {block.tableTitle && (
+          <Text style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, textAlign: 'center', color: '#1e293b' }}>
+            {block.tableTitle}
+          </Text>
+        )}
+        {block.tableSubtitle && (
+          <Text style={{ fontSize: 10, fontWeight: 400, marginBottom: 12, textAlign: 'center', color: '#64748b' }}>
+            {block.tableSubtitle}
+          </Text>
+        )}
+
+        <View style={[styles.table, { marginTop: 20 }]}>
+          {/* Header Row: Features Label + Plan Names */}
+          <View style={[styles.tableRow, styles.tableHeader]}>
+            <View style={[styles.tableCell, { flex: 1.5, backgroundColor: '#f1f5f9' }]}>
+              <Text style={[styles.tableName, { fontWeight: 900 }]}>FEATURES</Text>
             </View>
-          ))}
-        </View>
-        <View style={[styles.tableRow]} wrap={true}>
-          {block.companies.map((c, idx) => (
-            <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell]}>
-              {c.benefits.split('\n').filter(b => b.trim()).map((benefit, bIdx) => (
-                <View key={bIdx} style={[styles.listItem, { width: '100%' }]}>
-                  {block.showTableBullets !== false && <Text style={styles.bullet}>•</Text>}
-                  <Text style={[styles.listText, { fontSize: safeNum(block.tableTextSize, 10) }]}>{benefit}</Text>
+            {block.companies.map((c, idx) => (
+              <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell, { alignItems: 'center' }]}>
+                <View style={{ height: safeNum(block.tableLogoSize, 30), marginBottom: 4, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                  {c.logoUrl && c.logoUrl.startsWith('data:') ? (
+                    <Image src={c.logoUrl} style={[styles.tableLogo, { height: safeNum(block.tableLogoSize, 30), width: 'auto' }]} />
+                  ) : (
+                    <View style={[styles.tableLogoFallback, { height: safeNum(block.tableLogoSize, 30) }]}>
+                      <Text style={styles.fallbackText}>{getInitials(c.name || 'PL')}</Text>
+                    </View>
+                  )}
                 </View>
-              ))}
-            </View>
-          ))}
+                <Text style={styles.tableName}>{c.name}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Data Rows: Feature Name + Values for each plan */}
+          {(() => {
+            // Extract unique feature names from all companies
+            const featureNames: string[] = [];
+            block.companies.forEach(c => {
+              c.benefits.split('\n').forEach(line => {
+                const name = line.replace(/\[tick\]|\[check\]|\[yes\]|\[cross\]|\[x\]|\[no\]/gi, '').split(':')[0].trim();
+                if (name && !featureNames.includes(name)) featureNames.push(name);
+              });
+            });
+
+            return featureNames.map((fName, fIdx) => (
+              <View key={fIdx} style={styles.tableRow} wrap={false}>
+                {/* Feature Label Column */}
+                <View style={[styles.tableCell, { flex: 1.5, backgroundColor: '#f8fafc' }]}>
+                  <Text style={[styles.listText, { fontWeight: 700, fontSize: safeNum(block.tableTextSize, 9) }]}>{fName}</Text>
+                </View>
+                
+                {/* Value Columns for each plan */}
+                {block.companies.map((c, cIdx) => {
+                  const line = c.benefits.split('\n').find(l => l.includes(fName)) || '';
+                  const hasTick = /\[tick\]|\[check\]|\[yes\]/i.test(line);
+                  const hasCross = /\[cross\]|\[x\]|\[no\]/i.test(line);
+                  const valPart = line.includes(':') ? line.split(':')[1].trim() : '';
+
+                  return (
+                    <View key={cIdx} style={[styles.tableCell, cIdx === block.companies.length - 1 && styles.lastCell, { alignItems: 'center', justifyContent: 'center' }]}>
+                      {hasTick ? (
+                        <Svg width="10" height="10" viewBox="0 0 24 24">
+                          <Path d="M20 6L9 17l-5-5" stroke="#10B981" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                        </Svg>
+                      ) : hasCross ? (
+                        <Svg width="10" height="10" viewBox="0 0 24 24">
+                          <Path d="M18 6L6 18M6 6l12 12" stroke="#EF4444" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                        </Svg>
+                      ) : (
+                        <Text style={[styles.listText, { fontSize: safeNum(block.tableTextSize, 9) }]}>{valPart}</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            ));
+          })()}
         </View>
       </View>
     );
@@ -396,9 +447,9 @@ interface Block {
   imageAlign?: string;
   isBackground?: boolean;
   companies?: Company[];
-  tableLogoSize?: number;
-  tableTextSize?: number;
   showTableBullets?: boolean;
+  tableTitle?: string;
+  tableSubtitle?: string;
 }
 
 interface PDFDocumentProps {
@@ -408,9 +459,14 @@ interface PDFDocumentProps {
   headerVAlign?: 'TOP' | 'BOTTOM';
   baseFontSize?: number;
   pageBgColor?: string;
+  orientation?: 'portrait' | 'landscape';
 }
 
-export const PDFDocument = ({ blocks, headerLogo, headerAlign, headerVAlign, baseFontSize = 11, pageBgColor = '#F5F3FF' }: PDFDocumentProps) => {
+export const PDFDocument = ({ 
+  blocks, headerLogo, headerAlign, headerVAlign, 
+  baseFontSize = 11, pageBgColor = '#F5F3FF', 
+  orientation = 'portrait' 
+}: PDFDocumentProps) => {
   // Split blocks into physical pages
   const pages: Block[][] = [];
   let currentPage: Block[] = [];
@@ -433,35 +489,37 @@ export const PDFDocument = ({ blocks, headerLogo, headerAlign, headerVAlign, bas
 
   return (
     <Document>
-      {pages.map((pBlocks, pIdx) => (
-        <Page key={pIdx} size="A4" style={[styles.page, { fontSize: safeNum(baseFontSize, 11), backgroundColor: pageBgColor }]}>
-          {/* Header Logo */}
-          {headerLogo && headerVAlign !== 'BOTTOM' && (
-            <View fixed style={[styles.header, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
-              <Image src={headerLogo} style={styles.logo} />
-            </View>
-          )}
+      {pages.map((pBlocks, pIdx) => {
+        const hasWideTable = pBlocks.some(b => b.type === 'COMPARISON_TABLE' && (b.companies?.length || 0) > 3);
+        const pageOrientation = hasWideTable ? 'landscape' : orientation;
 
-          {/* Footer Logo */}
-          {headerLogo && headerVAlign === 'BOTTOM' && (
-            <View fixed style={[styles.footer, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
-              <Image src={headerLogo} style={styles.logo} />
-            </View>
-          )}
+        return (
+          <Page key={pIdx} size="A4" orientation={pageOrientation} style={[styles.page, { fontSize: safeNum(baseFontSize, 11), backgroundColor: pageBgColor }]}>
+            {headerLogo && headerVAlign !== 'BOTTOM' && (
+              <View fixed style={[styles.header, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
+                <Image src={headerLogo} style={styles.logo} />
+              </View>
+            )}
 
-          {/* Main Content */}
-          <View style={styles.content}>
-            {pBlocks.map((block: Block) => (
-              <PDFBlock 
-                key={block.id} 
-                block={block} 
-                styles={styles} 
-                cleanStyle={cleanStyle} 
-              />
-            ))}
-          </View>
-        </Page>
-      ))}
+            {headerLogo && headerVAlign === 'BOTTOM' && (
+              <View fixed style={[styles.footer, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
+                <Image src={headerLogo} style={styles.logo} />
+              </View>
+            )}
+
+            <View style={styles.content}>
+              {pBlocks.map((block: Block) => (
+                <PDFBlock 
+                  key={block.id} 
+                  block={block} 
+                  styles={styles} 
+                  cleanStyle={cleanStyle} 
+                />
+              ))}
+            </View>
+          </Page>
+        );
+      })}
     </Document>
   );
 };
