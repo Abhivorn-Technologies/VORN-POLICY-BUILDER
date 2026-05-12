@@ -46,7 +46,7 @@ const idbGet = async (key: string) => {
   } catch (e) { return null; }
 };
 
-const idbSet = async (key: string, value: any) => {
+const idbSet = async (key: string, value: unknown) => {
   try {
     const db = await dbPromise;
     if (!db) return;
@@ -97,6 +97,8 @@ interface Block {
   showTableBullets?: boolean;
   tableTitle?: string;
   tableSubtitle?: string;
+  tableLogoSize?: number;
+  tableTextSize?: number;
 }
 
 interface Variable {
@@ -133,9 +135,9 @@ const EditorBlock = React.memo(({
   updateBlock: (id: string, updates: Partial<Block>) => void,
   removeBlock: (id: string) => void,
   moveBlock: (idx: number, dir: 'UP' | 'DOWN') => void,
-  handleBlockImageUpload: (idx: number, e: any) => void,
-  handleTableCompanyLogoUpload: (idx: number, cIdx: number, e: any) => void,
-  handleExcelUpload: (blockId: string, e: any) => void,
+  handleBlockImageUpload: (idx: number, e: React.ChangeEvent<HTMLInputElement>) => void,
+  handleTableCompanyLogoUpload: (idx: number, cIdx: number, e: React.ChangeEvent<HTMLInputElement>) => void,
+  handleExcelUpload: (blockId: string, e: React.ChangeEvent<HTMLInputElement>) => void,
   logoStatuses: Record<string, string>,
   handleLogoUrlChange: (url: string, id: string, callback: (final: string) => void) => Promise<void>
 }) => {
@@ -332,7 +334,7 @@ const EditorBlock = React.memo(({
 
                       {logoStatuses[c.id] === 'WEB_ONLY' && (
                         <div style={{ fontSize: '10px', color: '#F59E0B', background: 'rgba(245,158,11,0.05)', padding: '8px', borderRadius: '4px', marginBottom: '12px', border: '1px solid rgba(245,158,11,0.1)' }}>
-                          ⚠️ <strong>Web-Only:</strong> This image works here but is blocked for PDF. Please download and use the "Upload Logo File" button below for a perfect export.
+                          ⚠️ <strong>Web-Only:</strong> This image works here but is blocked for PDF. Please download and use the &quot;Upload Logo File&quot; button below for a perfect export.
                         </div>
                       )}
                       
@@ -431,7 +433,7 @@ export default function PolicyEditor() {
   const [variables, setVariables] = useState<Variable[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [excelPreview, setExcelPreview] = useState<{ isOpen: boolean, data: any[][], targetBlockId?: string }>({
+  const [excelPreview, setExcelPreview] = useState<{ isOpen: boolean, data: unknown[][], targetBlockId?: string }>({
     isOpen: false,
     data: [],
   });
@@ -524,8 +526,8 @@ export default function PolicyEditor() {
         // 1. Fast Metadata First
         const savedLogo = localStorage.getItem('pb-logo');
         if (savedLogo) setHeaderLogoUrl(savedLogo);
-        setHeaderAlign(localStorage.getItem('pb-logo-align') as any || 'center');
-        setHeaderVAlign(localStorage.getItem('pb-logo-valign') as any || 'TOP');
+        setHeaderAlign(localStorage.getItem('pb-logo-align') as 'left' | 'center' | 'right' || 'center');
+        setHeaderVAlign(localStorage.getItem('pb-logo-valign') as 'TOP' | 'BOTTOM' || 'TOP');
         
         const savedTheme = localStorage.getItem('pb-theme');
         if (savedTheme) setTheme(savedTheme as 'light' | 'dark');
@@ -691,7 +693,7 @@ export default function PolicyEditor() {
 
   useEffect(() => {
     if (!isDataLoaded) return;
-    setIsSyncing(true);
+    const syncTimer = setTimeout(() => setIsSyncing(true), 0);
     const timer = setTimeout(() => {
       const prepared = blocks.map(b => ({
         ...b,
@@ -706,7 +708,10 @@ export default function PolicyEditor() {
       setDebouncedLogo(headerLogoUrl);
       setIsSyncing(false);
     }, 1500); // 1.5s pause before heavy PDF render
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(syncTimer);
+      clearTimeout(timer);
+    };
   }, [blocks, headerLogoUrl, replaceVars, isDataLoaded]);
 
   // TEMPLATE ENGINE
@@ -803,7 +808,7 @@ export default function PolicyEditor() {
         const wb = XLSX.read(dataBuffer, { type: 'array' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as any[][];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as unknown[][];
         
         if (data.length === 0) {
           openDialog({ type: 'ALERT', title: 'Empty File', message: 'The uploaded excel sheet appears to be empty.', onConfirm: closeDialog });
@@ -892,7 +897,7 @@ export default function PolicyEditor() {
           if (!hasAnyValue) continue;
 
           // Handle boolean-like values for tick/cross
-          let valStr = String(value).trim().toLowerCase();
+          const valStr = String(value).trim().toLowerCase();
           const isExplicitBoolean = ['yes', 'no', 'true', 'false', 'check', 'tick', 'cross', 'x'].includes(valStr);
           
           if (isExplicitBoolean) {
@@ -1407,7 +1412,7 @@ export default function PolicyEditor() {
                 />
               ))}
               
-              <div style={{ display: activeTab === 'settings' ? 'block' : 'none' as any }}>
+              <div style={{ display: (activeTab === 'settings' ? 'block' : 'none') as React.CSSProperties['display'] }}>
                 {activeTab === 'settings' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '40px' }}>
                     <div>

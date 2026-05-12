@@ -193,6 +193,7 @@ const styles = StyleSheet.create({
 });
 
 // --- NAN SHIELD 2.0 ---
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cleanStyle = (style: any) => {
   const result = { ...style };
   Object.keys(result).forEach(key => {
@@ -215,6 +216,7 @@ const cleanHTML = (html: string) => {
 };
 
 // --- MEMOIZED PDF BLOCK ---
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styles: any, cleanStyle: (s: any) => any }) => {
   const parsedContent = React.useMemo(() => {
     if (block.type !== 'RICHTEXT') return null;
@@ -222,6 +224,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleanHTML(block.htmlContent || ''), 'text/html');
     
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const walk = (node: Node, style: any, key: string): React.ReactNode => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent || '';
@@ -308,7 +311,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
   }
 
   if (block.type === 'IMAGE' && block.imageUrl) {
-    const safeNum = (val: any, fallback: number) => {
+    const safeNum = (val: unknown, fallback: number) => {
       const n = typeof val === 'string' ? parseFloat(val) : val;
       return (typeof n === 'number' && isFinite(n)) ? n : fallback;
     };
@@ -331,14 +334,14 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
       );
     }
     return (
-      <View style={{ alignItems: (block.imageAlign as any) || 'center', marginTop: 20 }}>
+      <View style={{ alignItems: (block.imageAlign as 'left' | 'center' | 'right') || 'center', marginTop: 20 }}>
         <Image src={block.imageUrl} style={imgStyle} />
       </View>
     );
   }
 
   if (block.type === 'COMPARISON_TABLE' && block.companies) {
-    const safeNum = (val: any, fallback: number) => {
+    const safeNum = (val: unknown, fallback: number) => {
       const n = typeof val === 'string' ? parseFloat(val) : val;
       return (typeof n === 'number' && isFinite(n)) ? n : fallback;
     };
@@ -362,7 +365,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
             <View style={[styles.tableCell, { flex: 1.5, backgroundColor: '#f1f5f9' }]}>
               <Text style={[styles.tableName, { fontWeight: 900 }]}>FEATURES</Text>
             </View>
-            {block.companies.map((c, idx) => (
+            {block.companies!.map((c, idx) => (
               <View key={c.id} style={[styles.tableCell, idx === block.companies!.length - 1 && styles.lastCell, { alignItems: 'center' }]}>
                 <View style={{ height: safeNum(block.tableLogoSize, 30), marginBottom: 4, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
                   {c.logoUrl && c.logoUrl.startsWith('data:') ? (
@@ -382,7 +385,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
           {(() => {
             // Extract unique feature names from all companies
             const featureNames: string[] = [];
-            block.companies.forEach(c => {
+            block.companies!.forEach(c => {
               c.benefits.split('\n').forEach(line => {
                 const name = line.replace(/\[tick\]|\[check\]|\[yes\]|\[cross\]|\[x\]|\[no\]/gi, '').split(':')[0].trim();
                 if (name && !featureNames.includes(name)) featureNames.push(name);
@@ -397,14 +400,14 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
                 </View>
                 
                 {/* Value Columns for each plan */}
-                {block.companies.map((c, cIdx) => {
+                {block.companies!.map((c, cIdx) => {
                   const line = c.benefits.split('\n').find(l => l.includes(fName)) || '';
                   const hasTick = /\[tick\]|\[check\]|\[yes\]/i.test(line);
                   const hasCross = /\[cross\]|\[x\]|\[no\]/i.test(line);
                   const valPart = line.includes(':') ? line.split(':')[1].trim() : '';
 
                   return (
-                    <View key={cIdx} style={[styles.tableCell, cIdx === block.companies.length - 1 && styles.lastCell, { alignItems: 'center', justifyContent: 'center' }]}>
+                    <View key={cIdx} style={[styles.tableCell, cIdx === block.companies!.length - 1 && styles.lastCell, { alignItems: 'center', justifyContent: 'center' }]}>
                       {hasTick ? (
                         <Svg width="10" height="10" viewBox="0 0 24 24">
                           <Path d="M20 6L9 17l-5-5" stroke="#10B981" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
@@ -450,6 +453,8 @@ interface Block {
   showTableBullets?: boolean;
   tableTitle?: string;
   tableSubtitle?: string;
+  tableLogoSize?: number;
+  tableTextSize?: number;
 }
 
 interface PDFDocumentProps {
@@ -482,7 +487,7 @@ export const PDFDocument = ({
   if (currentPage.length > 0) pages.push(currentPage);
   if (pages.length === 0) pages.push([]); // Handle empty case
 
-  const safeNum = (val: any, fallback: number) => {
+  const safeNum = (val: unknown, fallback: number) => {
     const n = typeof val === 'string' ? parseFloat(val) : val;
     return (typeof n === 'number' && isFinite(n)) ? n : fallback;
   };
