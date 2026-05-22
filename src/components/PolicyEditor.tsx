@@ -56,7 +56,7 @@ const idbSet = async (key: string, value: unknown) => {
 };
 
 // --- TYPES ---
-type BlockType = 'RICHTEXT' | 'IMAGE' | 'COMPARISON_TABLE' | 'PAGE_BREAK';
+type BlockType = 'RICHTEXT' | 'IMAGE' | 'COMPARISON_TABLE' | 'PAGE_BREAK' | 'INSURANCE_COMPARISON';
 
 interface Company {
   id: string;
@@ -64,6 +64,20 @@ interface Company {
   logoUrl: string;
   benefits: string;
 }
+
+const INSURANCE_COMPANIES = [
+  "Bajaj GIC Ltd", "Chola MS Gic Ltd", "Generali Central GIC lTd", "Digit Gic Ltd",
+  "HDFC Ergo Gic Ltd", "Icici Lombard Gic ltd", "Zurich Kotak Gic Ltd", "Liberty Gic Ltd",
+  "National Insurance", "Indusind Gic Ltd", "Royal Sundaram Gic Ltd", "SBI Gic Ltd",
+  "Tata Aig Gic Ltd", "Kiwi Gic Ltd"
+];
+
+const ADDON_COVERS = [
+  "Key Protection", "Road Side Assistance", "Zero Dep", "Consumable",
+  "Engine Cover", "Tyre Cover", "RIM cover", "Return To Invoice cover",
+  "Rat Bite (Animal Bite)", "Battery Cover (Battery And Hybrid Vehciles)", "Charger cover (Battery Vehicles)"
+];
+
 
 const quillModules = {
   toolbar: [
@@ -99,6 +113,9 @@ interface Block {
   tableSubtitle?: string;
   tableLogoSize?: number;
   tableTextSize?: number;
+  // NEW FIELDS FOR INSURANCE COMPARISON
+  insuranceCompanies?: { name: string; logoUrl: string }[];
+  insuranceAddons?: { name: string; statuses: Record<number, 'tick' | 'cross' | 'none'> }[];
 }
 
 interface Variable {
@@ -402,6 +419,159 @@ const EditorBlock = React.memo(({
              </div>
           </div>
         )}
+        {block.type === 'INSURANCE_COMPARISON' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr', gap: '24px' }}>
+              {/* COMPANY SELECTION */}
+              <div style={{ padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', border: '1px solid var(--border-subtle)' }}>
+                <label className="label-sm" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', color: 'var(--brand-primary)', fontWeight: 800 }}>
+                  <span>SELECT COMPANIES (MAX 4)</span>
+                  <span style={{ fontSize: '10px', opacity: 0.6 }}>{block.insuranceCompanies?.length || 0}/4</span>
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+                  {INSURANCE_COMPANIES.map(company => {
+                    const isSelected = block.insuranceCompanies?.some(c => c.name === company);
+                    return (
+                      <button
+                        key={company}
+                        onClick={() => {
+                          const current = block.insuranceCompanies || [];
+                          if (isSelected) {
+                            updateBlock(block.id, { 
+                              insuranceCompanies: current.filter(c => c.name !== company),
+                            });
+                          } else if (current.length < 4) {
+                            updateBlock(block.id, { 
+                              insuranceCompanies: [...current, { name: company, logoUrl: '' }] 
+                            });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 600,
+                          background: isSelected ? 'var(--brand-primary)' : 'var(--bg-secondary)',
+                          color: isSelected ? 'white' : 'var(--text-secondary)',
+                          border: '1px solid var(--border-subtle)', cursor: 'pointer', transition: 'all 0.2s'
+                        }}
+                      >
+                        {company}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ADDON SELECTION */}
+              <div style={{ padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', border: '1px solid var(--border-subtle)' }}>
+                <label className="label-sm" style={{ marginBottom: '16px', color: '#10B981', fontWeight: 800 }}>SELECT ADDON COVERS</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {ADDON_COVERS.map(addon => {
+                    const isSelected = block.insuranceAddons?.some(a => a.name === addon);
+                    return (
+                      <button
+                        key={addon}
+                        onClick={() => {
+                          const current = block.insuranceAddons || [];
+                          if (isSelected) {
+                            updateBlock(block.id, { insuranceAddons: current.filter(a => a.name !== addon) });
+                          } else {
+                            updateBlock(block.id, { insuranceAddons: [...current, { name: addon, statuses: {} }] });
+                          }
+                        }}
+                        style={{
+                          padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 600,
+                          background: isSelected ? '#10B981' : 'var(--bg-secondary)',
+                          color: isSelected ? 'white' : 'var(--text-secondary)',
+                          border: '1px solid var(--border-subtle)', cursor: 'pointer', transition: 'all 0.2s'
+                        }}
+                      >
+                        {addon}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* COMPARISON GRID */}
+            {(block.insuranceCompanies?.length || 0) > 0 && (block.insuranceAddons?.length || 0) > 0 && (
+              <div className="animate-fade" style={{ overflowX: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', border: '1px solid var(--border-subtle)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255,255,255,0.05)' }}>
+                      <th style={{ padding: '16px', textAlign: 'left', borderBottom: '1px solid var(--border-subtle)', minWidth: '180px', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 800, textTransform: 'uppercase' }}>Addon Covers</th>
+                      {block.insuranceCompanies?.map((company, cIdx) => (
+                        <th key={cIdx} style={{ padding: '16px', textAlign: 'center', borderBottom: '1px solid var(--border-subtle)', borderLeft: '1px solid var(--border-subtle)' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--brand-primary)' }}>{company.name}</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.insuranceAddons?.map((addon, aIdx) => (
+                      <tr key={aIdx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-primary)' }}>{addon.name}</td>
+                        {block.insuranceCompanies?.map((_, cIdx) => {
+                          const status = addon.statuses[cIdx] || 'none';
+                          return (
+                            <td key={cIdx} style={{ padding: '8px', textAlign: 'center', borderLeft: '1px solid var(--border-subtle)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    const nextAddons = [...(block.insuranceAddons || [])];
+                                    const nextStatuses = { ...nextAddons[aIdx].statuses };
+                                    nextStatuses[cIdx] = status === 'tick' ? 'none' : 'tick';
+                                    nextAddons[aIdx] = { ...nextAddons[aIdx], statuses: nextStatuses };
+                                    updateBlock(block.id, { insuranceAddons: nextAddons });
+                                  }}
+                                  style={{
+                                    width: '36px', height: '36px', borderRadius: '10px', border: 'none', cursor: 'pointer',
+                                    background: status === 'tick' ? '#10B981' : 'var(--bg-secondary)',
+                                    color: status === 'tick' ? 'white' : 'var(--text-muted)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s',
+                                    boxShadow: status === 'tick' ? '0 4px 12px rgba(16, 185, 129, 0.2)' : 'none'
+                                  }}
+                                >
+                                  <Check size={18} strokeWidth={3} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const nextAddons = [...(block.insuranceAddons || [])];
+                                    const nextStatuses = { ...nextAddons[aIdx].statuses };
+                                    nextStatuses[cIdx] = status === 'cross' ? 'none' : 'cross';
+                                    nextAddons[aIdx] = { ...nextAddons[aIdx], statuses: nextStatuses };
+                                    updateBlock(block.id, { insuranceAddons: nextAddons });
+                                  }}
+                                  style={{
+                                    width: '36px', height: '36px', borderRadius: '10px', border: 'none', cursor: 'pointer',
+                                    background: status === 'cross' ? '#EF4444' : 'var(--bg-secondary)',
+                                    color: status === 'cross' ? 'white' : 'var(--text-muted)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s',
+                                    boxShadow: status === 'cross' ? '0 4px 12px rgba(239, 68, 68, 0.2)' : 'none'
+                                  }}
+                                >
+                                  <X size={18} strokeWidth={3} />
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            
+            {(!block.insuranceCompanies?.length || !block.insuranceAddons?.length) && (
+              <div style={{ padding: '60px 40px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: '24px', border: '2px dashed var(--border-subtle)', color: 'var(--text-muted)' }}>
+                <CheckCircle size={40} style={{ marginBottom: '16px', opacity: 0.2 }} />
+                <p style={{ fontWeight: 600, fontSize: '14px' }}>Select companies and addons above to build your comparison grid.</p>
+                <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.6 }}>Compare up to 4 companies at once.</p>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -424,6 +594,12 @@ export default function PolicyEditor() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileActivePanel, setMobileActivePanel] = useState<'sidebar' | 'editor' | 'preview'>('editor');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [coverImageFit, setCoverImageFit] = useState<'cover' | 'contain' | 'fill'>('contain');
+
+  const [coverNameSize, setCoverNameSize] = useState(28);
+  const [coverNameBold, setCoverNameBold] = useState(true);
+  const [coverNameAlign, setCoverNameAlign] = useState<'left' | 'center' | 'right'>('left');
+  const [coverNameColor, setCoverNameColor] = useState('#1e293b');
 
   // CORE STATE
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -448,6 +624,8 @@ export default function PolicyEditor() {
     message: '',
     onConfirm: () => {}
   });
+
+  const [loadKey, setLoadKey] = useState(0);
 
   const openDialog = (options: Omit<DialogState, 'isOpen'>) => {
     setDialog({ ...options, isOpen: true });
@@ -542,6 +720,18 @@ export default function PolicyEditor() {
 
         const savedPageColor = localStorage.getItem('pb-page-color');
         if (savedPageColor) setPageBgColor(savedPageColor);
+        
+        const savedCoverFit = localStorage.getItem('pb-cover-fit');
+        if (savedCoverFit) setCoverImageFit(savedCoverFit as 'cover' | 'contain' | 'fill');
+
+        const savedCoverNameSize = localStorage.getItem('pb-cover-name-size');
+        if (savedCoverNameSize) setCoverNameSize(parseInt(savedCoverNameSize) || 28);
+        const savedCoverNameBold = localStorage.getItem('pb-cover-name-bold');
+        if (savedCoverNameBold) setCoverNameBold(savedCoverNameBold === 'true');
+        const savedCoverNameAlign = localStorage.getItem('pb-cover-name-align');
+        if (savedCoverNameAlign) setCoverNameAlign(savedCoverNameAlign as 'left' | 'center' | 'right');
+        const savedCoverNameColor = localStorage.getItem('pb-cover-name-color');
+        if (savedCoverNameColor) setCoverNameColor(savedCoverNameColor);
 
         // 2. Heavy Document Data Next
         const [savedBlocks, savedVariables, savedTemplates] = await Promise.all([
@@ -583,6 +773,11 @@ export default function PolicyEditor() {
         localStorage.setItem('pb-theme', theme);
         localStorage.setItem('pb-base-font', baseFontSize.toString());
         localStorage.setItem('pb-page-color', pageBgColor);
+        localStorage.setItem('pb-cover-fit', coverImageFit);
+        localStorage.setItem('pb-cover-name-size', coverNameSize.toString());
+        localStorage.setItem('pb-cover-name-bold', coverNameBold.toString());
+        localStorage.setItem('pb-cover-name-align', coverNameAlign);
+        localStorage.setItem('pb-cover-name-color', coverNameColor);
 
       } catch (e) {
         console.error('Storage Error:', e);
@@ -594,7 +789,7 @@ export default function PolicyEditor() {
     }, 1500);
 
     return () => clearTimeout(timeoutId);
-  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, templates, theme, baseFontSize, pageBgColor]);
+  }, [blocks, headerLogoUrl, headerAlign, headerVAlign, variables, templates, theme, baseFontSize, pageBgColor, coverImageFit, coverNameSize, coverNameBold, coverNameAlign, coverNameColor]);
 
   // RESIZING LOGIC
   useEffect(() => {
@@ -694,6 +889,13 @@ export default function PolicyEditor() {
   // DEFERRED VALUES FOR PREVIEW
   const deferredBlocks = useDeferredValue(debouncedBlocks);
   const deferredLogo = useDeferredValue(debouncedLogo);
+  const deferredVariables = useDeferredValue(variables);
+  const deferredCoverSize = useDeferredValue(coverNameSize);
+  const deferredCoverBold = useDeferredValue(coverNameBold);
+  const deferredCoverAlign = useDeferredValue(coverNameAlign);
+  const deferredCoverColor = useDeferredValue(coverNameColor);
+  const deferredBaseFontSize = useDeferredValue(baseFontSize);
+  const deferredPageBgColor = useDeferredValue(pageBgColor);
 
   useEffect(() => {
     if (!isDataLoaded) return;
@@ -737,6 +939,7 @@ export default function PolicyEditor() {
         const updated = [...templates, newTemp];
         setTemplates(updated);
         localStorage.setItem('pb-templates', JSON.stringify(updated));
+        idbSet('pb-templates', updated); // Explicitly sync to IDB
         closeDialog();
       },
       onCancel: closeDialog
@@ -752,6 +955,7 @@ export default function PolicyEditor() {
         setBlocks(t.blocks);
         setHeaderLogoUrl(t.logo);
         setVariables(t.variables);
+        setLoadKey(prev => prev + 1); // Force remount of all blocks
         closeDialog();
       },
       onCancel: closeDialog
@@ -976,7 +1180,7 @@ export default function PolicyEditor() {
     <div suppressHydrationWarning className={`app-container ${theme}`} style={{ 
       background: theme === 'dark' ? '#050510' : '#f8fafc',
       color: theme === 'dark' ? '#f8fafc' : '#0f172a',
-      minHeight: '100vh',
+      height: '100vh',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden' // Root container should not scroll
@@ -1047,8 +1251,21 @@ export default function PolicyEditor() {
         }
         .app-main-content {
           scrollbar-width: thin;
-          scrollbar-color: var(--text-muted) transparent;
+          scrollbar-color: var(--brand-primary) transparent;
           scroll-behavior: smooth;
+        }
+        ::-webkit-scrollbar {
+          width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: rgba(59, 130, 246, 0.2);
+          border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+          background: var(--brand-primary);
         }
         * { box-sizing: border-box; }
         
@@ -1091,7 +1308,7 @@ export default function PolicyEditor() {
             
             {isMounted && (
               <PDFDownloadLink 
-                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={baseFontSize} pageBgColor={pageBgColor} orientation={orientation} />} 
+                document={<PDFDocument blocks={debouncedBlocks} headerLogo={debouncedLogo} headerAlign={headerAlign} headerVAlign={headerVAlign} baseFontSize={deferredBaseFontSize} pageBgColor={deferredPageBgColor} orientation={orientation} coverImageFit={coverImageFit} variables={deferredVariables} coverNameSize={deferredCoverSize} coverNameBold={deferredCoverBold} coverNameAlign={deferredCoverAlign} coverNameColor={deferredCoverColor} />} 
                 fileName="PolicyProposal.pdf"
                 className="btn-primary"
                 style={{ padding: isMobile ? '10px 14px' : '12px 24px', fontSize: isMobile ? '11px' : '13px' }}
@@ -1198,6 +1415,10 @@ export default function PolicyEditor() {
                   <button onClick={() => addBlock('RICHTEXT')} className="side-btn"><Type size={18} /> Text Block</button>
                   <button onClick={() => addBlock('IMAGE')} className="side-btn"><ImageIcon size={18} /> Image Block</button>
                   <button onClick={() => addBlock('COMPARISON_TABLE')} className="side-btn"><TableIcon size={18} /> Comparison Table</button>
+                  <button onClick={() => addBlock('INSURANCE_COMPARISON')} className="side-btn" style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid var(--brand-primary)', color: 'var(--brand-primary)' }}>
+                    <CheckCircle size={18} /> Insurance Comparison
+                  </button>
+
                   <label className="side-btn" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <FileSpreadsheet size={18} /> Excel Import
                     <input type="file" hidden accept=".xlsx, .xls, .csv" onChange={(e) => handleExcelUpload('', e)} />
@@ -1336,6 +1557,25 @@ export default function PolicyEditor() {
                       Premium Purple
                     </button>
                   </div>
+                  
+                  <div className="side-label" style={{ marginTop: '12px' }}>Cover Image Fit</div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {(['contain', 'cover', 'fill'] as const).map(fit => (
+                      <button 
+                        key={fit}
+                        onClick={() => setCoverImageFit(fit)}
+                        style={{ 
+                          flex: 1, padding: '12px', borderRadius: '12px', 
+                          background: coverImageFit === fit ? 'var(--brand-primary)' : 'var(--bg-primary)',
+                          color: coverImageFit === fit ? 'white' : 'var(--text-secondary)',
+                          border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                          fontSize: '11px', fontWeight: 700
+                        }}
+                      >
+                        {fit.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                </div>
             )}
           </div>
@@ -1402,9 +1642,71 @@ export default function PolicyEditor() {
                 )}
               </div>
 
+              {/* DYNAMIC CLIENT NAME INPUT ON FIRST PAGE */}
+              <div className="editor-card animate-fade" style={{ marginBottom: '16px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', borderLeft: '4px solid var(--brand-primary)' }}>
+                <label className="label-sm" style={{ fontWeight: 800, color: 'var(--brand-primary)' }}>CLIENT NAME</label>
+                <input 
+                  type="text" 
+                  value={variables.find(v => v.key === 'CustomerName')?.value || ''}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    setVariables(prev => {
+                      const exists = prev.find(v => v.key === 'CustomerName');
+                      if (exists) {
+                        return prev.map(v => v.key === 'CustomerName' ? { ...v, value: newName } : v);
+                      }
+                      return [...prev, { key: 'CustomerName', value: newName }];
+                    });
+                  }}
+                  placeholder="Enter Client Name..."
+                  style={{
+                    padding: '12px 16px',
+                    fontSize: '16px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 600,
+                    width: '100%'
+                  }}
+                />
+                
+                {/* NAME STYLING OPTIONS */}
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ flex: 1, minWidth: '120px' }}>
+                    <label className="label-sm" style={{ fontSize: '10px' }}>SIZE ({coverNameSize}px)</label>
+                    <input type="range" min="12" max="72" value={coverNameSize} onChange={e => setCoverNameSize(parseInt(e.target.value))} style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                    <div>
+                      <label className="label-sm" style={{ fontSize: '10px', display: 'block' }}>WEIGHT</label>
+                      <button onClick={() => setCoverNameBold(!coverNameBold)} style={{ padding: '8px 12px', borderRadius: '8px', background: coverNameBold ? 'var(--brand-primary)' : 'var(--bg-primary)', color: coverNameBold ? 'white' : 'var(--text-secondary)', border: '1px solid var(--border-subtle)', cursor: 'pointer', fontWeight: 800 }}>B</button>
+                    </div>
+                    <div>
+                      <label className="label-sm" style={{ fontSize: '10px', display: 'block' }}>COLOR</label>
+                      <input type="color" value={coverNameColor} onChange={e => setCoverNameColor(e.target.value)} style={{ padding: 0, border: 'none', width: '36px', height: '36px', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label-sm" style={{ fontSize: '10px', display: 'block' }}>ALIGNMENT</label>
+                    <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                      {(['left', 'center', 'right'] as const).map(a => (
+                        <button 
+                          key={a} 
+                          onClick={() => setCoverNameAlign(a)} 
+                          style={{ padding: '6px 12px', fontSize: '10px', fontWeight: 800, borderRadius: '6px', background: coverNameAlign === a ? 'var(--bg-primary)' : 'transparent', color: coverNameAlign === a ? 'var(--brand-primary)' : 'var(--text-muted)', border: 'none', cursor: 'pointer' }}
+                        >
+                          {a.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {blocks.map((block, idx) => (
                 <EditorBlock 
-                  key={block.id}
+                  key={`${block.id}-${loadKey}`}
                   block={block}
                   idx={idx}
                   isLast={idx === blocks.length - 1}
@@ -1475,6 +1777,26 @@ export default function PolicyEditor() {
                         </button>
                       </div>
                     </div>
+                    <div>
+                      <label className="side-label"><ImageIcon size={14} /> Cover Image Fit</label>
+                      <div className="editor-card" style={{ padding: '24px', display: 'flex', gap: '24px' }}>
+                        {(['contain', 'cover', 'fill'] as const).map(fit => (
+                          <button 
+                            key={fit}
+                            onClick={() => setCoverImageFit(fit)}
+                            style={{ 
+                              flex: 1, height: '40px', borderRadius: '8px', 
+                              background: coverImageFit === fit ? 'var(--brand-primary)' : 'var(--bg-primary)',
+                              color: coverImageFit === fit ? 'white' : 'var(--text-secondary)',
+                              border: coverImageFit === fit ? '2px solid var(--brand-primary)' : '1px solid var(--border-subtle)',
+                              fontSize: '11px', fontWeight: 800, cursor: 'pointer'
+                            }}
+                          >
+                            {fit.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1535,9 +1857,15 @@ export default function PolicyEditor() {
                       headerLogo={deferredLogo} 
                       headerAlign={headerAlign} 
                       headerVAlign={headerVAlign}
-                      baseFontSize={baseFontSize}
-                      pageBgColor={pageBgColor}
+                      baseFontSize={deferredBaseFontSize}
+                      pageBgColor={deferredPageBgColor}
                       orientation={orientation}
+                      coverImageFit={coverImageFit}
+                      variables={deferredVariables}
+                      coverNameSize={deferredCoverSize}
+                      coverNameBold={deferredCoverBold}
+                      coverNameAlign={deferredCoverAlign}
+                      coverNameColor={deferredCoverColor}
                     />
                   </PDFViewer>
 

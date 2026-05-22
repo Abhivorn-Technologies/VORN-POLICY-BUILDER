@@ -253,7 +253,7 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
 
         if (tag === 'img') {
           const src = el.getAttribute('src');
-          if (src) return <Image key={key} src={src} style={cleanStyle({ width: '100%', marginTop: 8, marginBottom: 8 })} />;
+          if (src) return <Image key={key} src={src} style={cleanStyle({ width: '100%', maxHeight: 500, objectFit: 'contain', marginTop: 8, marginBottom: 8 })} />;
         }
         if (tag === 'br') return <Text key={key}>{'\n'}</Text>;
 
@@ -319,7 +319,9 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
     const imgStyle = [
        styles.image, 
        { 
-         width: `${safeNum(block.imageWidth, 100)}%`, 
+         width: `${safeNum(block.imageWidth, 100)}%`,
+         maxHeight: 650,
+         objectFit: 'contain',
          borderRadius: safeNum(block.imageRadius, 0) 
        }
     ];
@@ -430,8 +432,57 @@ const PDFBlock = React.memo(({ block, styles, cleanStyle }: { block: Block, styl
       </View>
     );
   }
+  if (block.type === 'INSURANCE_COMPARISON' && block.insuranceCompanies && block.insuranceAddons) {
+
+    
+    return (
+      <View key={block.id} style={{ marginBottom: 20 }}>
+        <View style={[styles.table, { marginTop: 10 }]}>
+          {/* Header Row */}
+          <View style={[styles.tableRow, styles.tableHeader]}>
+            <View style={[styles.tableCell, { flex: 1.5, backgroundColor: '#f1f5f9', alignItems: 'flex-start', paddingLeft: 8 }]}>
+              <Text style={[styles.tableName, { fontWeight: 900, fontSize: 8 }]}>ADDON COVERS</Text>
+            </View>
+            {block.insuranceCompanies.map((c, idx) => (
+              <View key={idx} style={[styles.tableCell, idx === block.insuranceCompanies!.length - 1 && styles.lastCell, { alignItems: 'center' }]}>
+                <Text style={[styles.tableName, { fontSize: 8 }]}>{c.name}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Addon Rows */}
+          {block.insuranceAddons.map((addon, aIdx) => (
+            <View key={aIdx} style={styles.tableRow} wrap={false}>
+              <View style={[styles.tableCell, { flex: 1.5, backgroundColor: '#f8fafc', alignItems: 'flex-start', paddingLeft: 8 }]}>
+                <Text style={[styles.listText, { fontWeight: 700, fontSize: 8 }]}>{addon.name}</Text>
+              </View>
+              {block.insuranceCompanies!.map((_, cIdx) => {
+                const status = addon.statuses[cIdx] || 'none';
+                return (
+                  <View key={cIdx} style={[styles.tableCell, cIdx === block.insuranceCompanies!.length - 1 && styles.lastCell, { alignItems: 'center', justifyContent: 'center' }]}>
+                    {status === 'tick' ? (
+                      <Svg width="12" height="12" viewBox="0 0 24 24">
+                        <Path d="M20 6L9 17l-5-5" stroke="#10B981" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                      </Svg>
+                    ) : status === 'cross' ? (
+                      <Svg width="12" height="12" viewBox="0 0 24 24">
+                        <Path d="M18 6L6 18M6 6l12 12" stroke="#EF4444" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                      </Svg>
+                    ) : (
+                      <Text style={{ fontSize: 8, color: '#cbd5e1' }}>—</Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  }
   return null;
 });
+
 PDFBlock.displayName = 'PDFBlock';
 
 interface Company {
@@ -456,6 +507,13 @@ interface Block {
   tableSubtitle?: string;
   tableLogoSize?: number;
   tableTextSize?: number;
+  insuranceCompanies?: { name: string; logoUrl: string }[];
+  insuranceAddons?: { name: string; statuses: Record<number, 'tick' | 'cross' | 'none'> }[];
+}
+
+interface Variable {
+  key: string;
+  value: string;
 }
 
 interface PDFDocumentProps {
@@ -466,12 +524,24 @@ interface PDFDocumentProps {
   baseFontSize?: number;
   pageBgColor?: string;
   orientation?: 'portrait' | 'landscape';
+  coverImageFit?: 'cover' | 'contain' | 'fill';
+  variables?: Variable[];
+  coverNameSize?: number;
+  coverNameBold?: boolean;
+  coverNameAlign?: 'left' | 'center' | 'right';
+  coverNameColor?: string;
 }
 
 export const PDFDocument = ({ 
   blocks, headerLogo, headerAlign, headerVAlign, 
   baseFontSize = 11, pageBgColor = '#F5F3FF', 
-  orientation = 'portrait' 
+  orientation = 'portrait',
+  coverImageFit = 'contain',
+  variables = [],
+  coverNameSize = 28,
+  coverNameBold = true,
+  coverNameAlign = 'left',
+  coverNameColor = '#1e293b'
 }: PDFDocumentProps) => {
   // Split blocks into physical pages
   const pages: Block[][] = [];
@@ -495,6 +565,30 @@ export const PDFDocument = ({
 
   return (
     <Document>
+      {/* Premium Cover Page */}
+      <Page size="A4" orientation="portrait" style={{ padding: 0, backgroundColor: pageBgColor }}>
+        {headerLogo && headerVAlign !== 'BOTTOM' && (
+          <View fixed style={[styles.header, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start', zIndex: 10, borderBottomWidth: 0 }]}>
+            <Image src={headerLogo} style={styles.logo} />
+          </View>
+        )}
+        
+        {headerLogo && headerVAlign === 'BOTTOM' && (
+          <View fixed style={[styles.footer, { justifyContent: headerAlign === 'center' ? 'center' : headerAlign === 'right' ? 'flex-end' : 'flex-start', zIndex: 10, borderTopWidth: 0 }]}>
+            <Image src={headerLogo} style={styles.logo} />
+          </View>
+        )}
+
+        <View style={{ height: '80%' }}>
+          <Image src={typeof window !== 'undefined' ? `${window.location.origin}/cover.png` : '/cover.png'} style={{ width: '100%', height: '100%', objectFit: coverImageFit }} />
+        </View>
+        <View style={{ height: '20%', display: 'flex', justifyContent: 'center', paddingLeft: 60, paddingRight: 60 }}>
+           <Text style={{ fontSize: coverNameSize, fontWeight: coverNameBold ? 700 : 400, color: coverNameColor, fontFamily: 'Helvetica', textAlign: coverNameAlign }}>
+             {variables.find(v => v.key === 'CustomerName')?.value || 'Valued Client'}
+           </Text>
+        </View>
+      </Page>
+
       {pages.map((pBlocks, pIdx) => {
         const hasWideTable = pBlocks.some(b => b.type === 'COMPARISON_TABLE' && (b.companies?.length || 0) > 3);
         const pageOrientation = hasWideTable ? 'landscape' : orientation;
